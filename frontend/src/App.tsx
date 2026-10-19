@@ -4,6 +4,7 @@ import { useAuthStore } from './stores/authStore';
 import { Layout } from './components/layout/Layout';
 import { DashboardOverview } from './features/dashboard/DashboardOverview';
 import { ProfilePage } from './features/profile/ProfilePage';
+import { LiveSessionRoom } from './features/session/LiveSessionRoom';
 
 // Placeholder views for subsequent phases
 const PhasePlaceholder: React.FC<{ title: string; phase: string; description: string }> = ({
@@ -75,6 +76,7 @@ export const App: React.FC = () => {
           />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
+        <Route path="/session/:sessionId" element={<LiveSessionRoom />} />
       </Routes>
     </BrowserRouter>
   );

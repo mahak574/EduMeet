@@ -13,7 +13,7 @@ from app.schemas.matching import (
     PoolJoinRequest,
     PoolStatusResponse,
 )
-from app.schemas.response import APIResponse
+from app.schemas.common import APIResponse
 from app.services.matching_service import MatchingService
 
 router = APIRouter(prefix="/matching", tags=["matching"])
