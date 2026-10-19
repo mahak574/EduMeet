@@ -18,10 +18,13 @@ import {
   Loader2,
   ChevronRight,
   CheckCircle2,
+  BookOpen,
 } from 'lucide-react';
 import { sessionApi, SessionDetails, PrecheckQuestion, ChatMessage } from '../../services/sessionApi';
 import { useAuthStore } from '../../stores/authStore';
 import { PostSessionModal } from './PostSessionModal';
+import { AISessionPlanDrawer } from './AISessionPlanDrawer';
+import { ReportUserModal } from '../safety/ReportUserModal';
 
 export const LiveSessionRoom: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -30,6 +33,8 @@ export const LiveSessionRoom: React.FC = () => {
   const [session, setSession] = useState<SessionDetails | null>(null);
   const [activeTab, setActiveTab] = useState<'editor' | 'whiteboard' | 'quiz'>('editor');
   const [postModalOpen, setPostModalOpen] = useState<boolean>(false);
+  const [aiDrawerOpen, setAiDrawerOpen] = useState<boolean>(false);
+  const [reportModalOpen, setReportModalOpen] = useState<boolean>(false);
   const [remainingSeconds, setRemainingSeconds] = useState<number>(1500);
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [partnerConnected, setPartnerConnected] = useState<boolean>(false);
@@ -340,12 +345,20 @@ export const LiveSessionRoom: React.FC = () => {
         </div>
 
         {/* Right: Quick Role & Action */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            onClick={() => setAiDrawerOpen(true)}
+            className="px-2.5 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-md"
+            title="Pedagogical Blueprint / AI Lesson Plan"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
+            <span className="hidden sm:inline">Lesson Blueprint</span>
+          </button>
           <button
             onClick={() => setPostModalOpen(true)}
             className="px-3 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-brand-500/20"
           >
-            <Sparkles className="w-3.5 h-3.5" /> Evaluate Session
+            <Sparkles className="w-3.5 h-3.5" /> Evaluate
           </button>
           <button
             onClick={() => sessionApi.advancePhase(session.session_id)}
@@ -353,6 +366,13 @@ export const LiveSessionRoom: React.FC = () => {
             title="Advance Phase (Testing / Mutual Agreement)"
           >
             Advance <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setReportModalOpen(true)}
+            className="p-2 rounded-xl border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 transition-all cursor-pointer"
+            title="Report Participant to Trust & Safety"
+          >
+            <ShieldAlert className="w-4 h-4" />
           </button>
           <button
             onClick={() => setChatOpen(!chatOpen)}
@@ -710,6 +730,23 @@ export const LiveSessionRoom: React.FC = () => {
         sessionId={session.session_id}
         partnerName={session.partner_name}
         learnedTopic={session.my_learn_topic}
+      />
+
+      {/* AI / Pedagogical Lesson Plan Drawer */}
+      <AISessionPlanDrawer
+        isOpen={aiDrawerOpen}
+        onClose={() => setAiDrawerOpen(false)}
+        sessionId={session.session_id}
+        onInsertCode={(codeSnippet) => setCode((prev) => (prev ? `${prev}\n\n${codeSnippet}` : codeSnippet))}
+      />
+
+      {/* Safety Report Modal */}
+      <ReportUserModal
+        isOpen={reportModalOpen}
+        onClose={() => setReportModalOpen(false)}
+        reportedUserId={session.partner_id}
+        reportedUserName={session.partner_name}
+        sessionId={session.session_id}
       />
     </div>
   );

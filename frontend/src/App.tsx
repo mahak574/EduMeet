@@ -6,6 +6,7 @@ import { DashboardOverview } from './features/dashboard/DashboardOverview';
 import { ProfilePage } from './features/profile/ProfilePage';
 import { LiveSessionRoom } from './features/session/LiveSessionRoom';
 import { MistakeJournalView } from './features/reviews/MistakeJournalView';
+import { PublicPortfolioView } from './features/portfolio/PublicPortfolioView';
 
 // Placeholder views for subsequent phases
 const PhasePlaceholder: React.FC<{ title: string; phase: string; description: string }> = ({
@@ -66,9 +67,11 @@ export const App: React.FC = () => {
             }
           />
           <Route path="mistakes" element={<MistakeJournalView />} />
+          <Route path="portfolio/:slug" element={<PublicPortfolioView />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
         <Route path="/session/:sessionId" element={<LiveSessionRoom />} />
+        <Route path="/p/:slug" element={<PublicPortfolioView />} />
       </Routes>
     </BrowserRouter>
   );

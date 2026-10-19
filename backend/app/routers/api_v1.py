@@ -7,6 +7,8 @@ from app.routers.skills import router as skills_router
 from app.routers.matching import router as matching_router
 from app.routers.peer_quizzes import router as peer_quizzes_router
 from app.routers.reviews import router as reviews_router
+from app.routers.safety import router as safety_router
+from app.routers.ai import router as ai_router
 
 api_v1_router = APIRouter()
 api_v1_router.include_router(auth_router)
@@ -17,3 +19,5 @@ api_v1_router.include_router(skills_router)
 api_v1_router.include_router(matching_router)
 api_v1_router.include_router(peer_quizzes_router)
 api_v1_router.include_router(reviews_router)
+api_v1_router.include_router(safety_router)
+api_v1_router.include_router(ai_router)
