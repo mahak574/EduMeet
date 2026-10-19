@@ -13,6 +13,7 @@ from app.schemas.portfolio import (
 )
 from app.schemas.profile import DataExportResponse, UpdateProfileRequest, VerifyStudentRequest
 from app.services.badge_service import BadgeService
+from app.services.streak_service import StreakService
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -39,6 +40,12 @@ def _format_user_resp(user: User) -> UserResponse:
 @router.get("/me", response_model=APIResponse[UserResponse])
 async def get_my_profile(current_user: User = Depends(get_current_user)):
     return APIResponse(success=True, data=_format_user_resp(current_user))
+
+
+@router.get("/me/activity", response_model=APIResponse[dict])
+async def get_my_activity_heatmap(current_user: User = Depends(get_current_user)):
+    data = await StreakService.get_user_activity_heat_map(current_user.id)
+    return APIResponse(success=True, data=data)
 
 
 @router.patch("/me", response_model=APIResponse[UserResponse])

@@ -12,6 +12,7 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    allowedHosts: ['snowless-agent-blatancy.ngrok-free.dev'],
     proxy: {
       '/api': {
         target: 'http://localhost:8000',

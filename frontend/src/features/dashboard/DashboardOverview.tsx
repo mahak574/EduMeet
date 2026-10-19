@@ -6,13 +6,13 @@ import { SkillMatrix } from './SkillMatrix';
 import { MatchConfirmationCard } from '../matching/MatchConfirmationCard';
 import {
   BrainCircuit,
-  Flame,
   Scale,
   Sparkles,
   ArrowRight,
-  CheckCircle,
   Lightbulb,
 } from 'lucide-react';
+
+import { WeeklyStreakHeatmap } from './WeeklyStreakHeatmap';
 
 export const DashboardOverview: React.FC = () => {
   const { isAuthenticated } = useAuthStore();
@@ -58,27 +58,11 @@ export const DashboardOverview: React.FC = () => {
         </div>
       </div>
 
-      {/* Motivation & Private Progress Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Weekly Streak Card */}
-        <div className="glass-panel p-6 rounded-2xl border border-white/10 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Weekly Consistency</span>
-            <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
-              <Flame className="w-4 h-4" />
-            </div>
-          </div>
-          <div>
-            <div className="text-2xl font-bold text-white">1 Week Streak</div>
-            <p className="text-xs text-slate-400 mt-1">
-              At least 1 completed reciprocal session per week. No high-anxiety daily streaks.
-            </p>
-          </div>
-          <div className="pt-2 flex items-center gap-2 text-xs text-emerald-400">
-            <CheckCircle className="w-3.5 h-3.5" /> 1 Streak Freeze Available
-          </div>
-        </div>
+      {/* Weekly Streak Consistency Tracker & GitHub Contribution Heat Map */}
+      <WeeklyStreakHeatmap />
 
+      {/* Private Motivation & Diagnostic Health */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Private Fairness Meter Card */}
         <div className="glass-panel p-6 rounded-2xl border border-white/10 space-y-3">
           <div className="flex items-center justify-between">
@@ -112,13 +96,16 @@ export const DashboardOverview: React.FC = () => {
           <div>
             <div className="text-2xl font-bold text-white">Diagnostic Bank</div>
             <p className="text-xs text-slate-400 mt-1">
-              Take a low-stakes 10-question evaluation to unlock topic-level peer matching.
+              Take a low-stakes evaluation to unlock topic-level peer matching.
             </p>
           </div>
           <div className="pt-2">
-            <span className="inline-flex items-center gap-1.5 text-xs text-brand-300 font-medium">
-              Calibrated by Bayesian Diagnostics
-            </span>
+            <Link
+              to="/diagnostic"
+              className="inline-flex items-center gap-1.5 text-xs text-brand-300 hover:text-brand-200 font-medium"
+            >
+              Calibrated by Bayesian Diagnostics →
+            </Link>
           </div>
         </div>
       </div>
