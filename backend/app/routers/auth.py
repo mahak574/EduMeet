@@ -147,7 +147,7 @@ async def google_auth(response: Response, payload: GoogleAuthRequest):
             country="US",
             timezone="UTC",
             role="student",
-            subjects_studied=["python", "dsa", "dbms"],
+            subjects_studied=[],
         )
         await user.insert()
 

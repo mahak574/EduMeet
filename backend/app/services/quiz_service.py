@@ -112,9 +112,9 @@ class QuizService:
         if attempts:
             latest = attempts[0]
             latest_expires = _ensure_utc(latest.expires_at)
-            # If an attempt is currently in progress and not expired, user should resume it
+            # If an attempt is currently in progress and not expired, user can continue it
             if not latest.is_completed and latest_expires and now < latest_expires:
-                return False, f"You have an active in-progress attempt for {cleaned_subject}. Please resume it."
+                return True, None
 
             # Calculate 7-day cooldown reference point
             cooldown_reference = _ensure_utc(latest.completed_at if latest.is_completed else latest.expires_at)
@@ -132,8 +132,22 @@ class QuizService:
         Samples 15-20 questions (3-4 per topic across difficulty tiers), excludes previously
         served questions, handles post-exhaustion repeats, and initializes the QuizAttempt.
         Dynamically supports any subject and topic entered by the user.
+        If an active uncompleted attempt already exists, returns it seamlessly to resume.
         """
         cleaned_subject = validate_slug(subject_slug)
+
+        # Check for existing active, unexpired attempt to resume directly
+        existing_attempts = await QuizAttempt.find(
+            QuizAttempt.user_id == user_id,
+            QuizAttempt.subject_slug == cleaned_subject,
+        ).sort("-started_at").to_list()
+        now = datetime.now(timezone.utc)
+        if existing_attempts:
+            latest = existing_attempts[0]
+            latest_expires = _ensure_utc(latest.expires_at)
+            if not latest.is_completed and latest_expires and now < latest_expires:
+                return latest
+
         can_start, reason = await QuizService.can_start_diagnostic(user_id, cleaned_subject)
         if not can_start:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=reason)
