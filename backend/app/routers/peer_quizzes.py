@@ -2,7 +2,7 @@ from typing import List, Optional
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.security import get_current_user
+from app.core.dependencies import get_current_user
 from app.models.consolidated import PeerQuiz, User
 from app.schemas.common import APIResponse
 from app.schemas.peer_quiz import (

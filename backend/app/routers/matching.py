@@ -2,7 +2,7 @@ from typing import Optional
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.security import get_current_user
+from app.core.dependencies import get_current_user
 from app.models.consolidated import Match, User
 from app.schemas.matching import (
     MatchConfirmRequest,
