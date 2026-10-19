@@ -113,6 +113,13 @@ class SubtopicScore(BaseModel):
 class TopicSkill(BaseModel):
     overall_score: float = Field(..., ge=0.0, le=100.0)
     subtopics: Dict[str, SubtopicScore] = Field(default_factory=dict)
+    confidence_level: str = "low"
+    last_assessed_at: Optional[datetime] = None
+    diagnostic_attempts_count: int = 0
+
+    @property
+    def score(self) -> float:
+        return self.overall_score
 
 
 class SkillProfile(Document):

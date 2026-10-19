@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { AuthModal } from '../auth/AuthModal';
+import { SkillMatrix } from './SkillMatrix';
 import {
   BrainCircuit,
   Flame,
@@ -114,12 +115,15 @@ export const DashboardOverview: React.FC = () => {
             </p>
           </div>
           <div className="pt-2">
-            <span className="inline-flex items-center gap-1.5 text-xs text-purple-300 font-medium">
-              Coming in Phase 2
+            <span className="inline-flex items-center gap-1.5 text-xs text-brand-300 font-medium">
+              Calibrated by Bayesian Diagnostics
             </span>
           </div>
         </div>
       </div>
+
+      {/* Private Skill Matrix & Diagnostics */}
+      <SkillMatrix />
 
       {/* How It Works 3-Step Walkthrough */}
       <div className="glass-panel p-6 rounded-2xl border border-white/10 space-y-6">

@@ -62,3 +62,65 @@ def test_match_participants_must_be_exactly_two():
             proposed_slots=[],
             expires_at="2026-10-25T12:00:00Z",
         )
+
+
+def test_session_lifecycle_status_and_attendance():
+    from app.models.consolidated import Session, SessionParticipant
+    from beanie import PydanticObjectId
+
+    p1 = SessionParticipant(
+        user_id=PydanticObjectId(),
+        role="teacher_a",
+        teach_subject_slug="dsa",
+        teach_topic_slug="arrays",
+        learn_subject_slug="dbms",
+        learn_topic_slug="indexing",
+    )
+    p2 = SessionParticipant(
+        user_id=PydanticObjectId(),
+        role="teacher_b",
+        teach_subject_slug="dbms",
+        teach_topic_slug="indexing",
+        learn_subject_slug="dsa",
+        learn_topic_slug="arrays",
+    )
+
+    session = Session(
+        match_id=PydanticObjectId(),
+        status="waiting_room",
+        scheduled_start_utc="2026-10-25T12:00:00Z",
+        scheduled_end_utc="2026-10-25T13:00:00Z",
+        video_room_id="room_123",
+        yjs_doc_id="doc_123",
+        participants=[p1, p2],
+        present_user_ids=[p1.user_id],
+    )
+    assert session.status == "waiting_room"
+    assert session.disconnect_grace_seconds == 180
+    assert session.max_pause_cap_seconds == 600
+    assert len(session.present_user_ids) == 1
+
+    # Transition to teacher_a
+    session.status = "teacher_a"
+    assert session.status == "teacher_a"
+
+    # Transition to no_show_cancelled
+    session.status = "no_show_cancelled"
+    assert session.status == "no_show_cancelled"
+
+
+def test_quiz_attempt_resumes_and_served_questions():
+    from app.models.consolidated import QuizAttempt
+    from beanie import PydanticObjectId
+
+    attempt = QuizAttempt(
+        user_id=PydanticObjectId(),
+        subject_slug="dsa",
+        attempt_number=1,
+        assigned_question_ids=[PydanticObjectId()],
+    )
+    assert attempt.resume_count == 0
+    assert attempt.max_resumes == 2
+    assert attempt.expires_at > attempt.started_at
+    assert isinstance(attempt.served_question_ids, list)
+

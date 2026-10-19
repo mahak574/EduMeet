@@ -21,6 +21,11 @@ logger = logging.getLogger("edumeet")
 async def lifespan(app: FastAPI):
     logger.info("Starting EduMeet backend application [%s]...", settings.APP_ENV)
     await init_db()
+    try:
+        from app.services.question_bank import seed_canonical_question_bank
+        await seed_canonical_question_bank()
+    except Exception as exc:
+        logger.warning("Could not auto-seed question bank during startup: %s", exc)
     yield
     logger.info("Shutting down EduMeet backend application...")
     await close_db()
