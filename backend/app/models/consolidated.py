@@ -266,6 +266,7 @@ class MatchParty(BaseModel):
     learn_topic_slug: str
     confirmed: bool = False
     confirmed_at: Optional[datetime] = None
+    selected_slot: Optional[datetime] = None
 
     @field_validator("teach_subject_slug", "teach_topic_slug", "learn_subject_slug", "learn_topic_slug", mode="after")
     @classmethod
@@ -280,6 +281,7 @@ class Match(Document):
     common_languages: List[str]
     proposed_slots: List[datetime]
     status: Literal["pending", "confirmed", "expired", "rejected"] = "pending"
+    session_id: Optional[PydanticObjectId] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     expires_at: datetime
 
@@ -288,6 +290,22 @@ class Match(Document):
         indexes = [
             IndexModel([("status", ASCENDING)]),
             IndexModel([("expires_at", ASCENDING)]),
+            IndexModel([("session_id", ASCENDING)]),
+        ]
+
+
+class MatchingPoolEntry(Document):
+    user_id: PydanticObjectId
+    subject_slugs: List[str] = Field(default_factory=lambda: ["dsa", "dbms"])
+    status: Literal["active", "matched", "cancelled"] = "active"
+    entered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    current_match_id: Optional[PydanticObjectId] = None
+
+    class Settings:
+        name = "matching_pool"
+        indexes = [
+            IndexModel([("user_id", ASCENDING)], unique=True),
+            IndexModel([("status", ASCENDING), ("entered_at", ASCENDING)]),
         ]
 
 

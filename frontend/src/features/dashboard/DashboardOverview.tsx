@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { AuthModal } from '../auth/AuthModal';
 import { SkillMatrix } from './SkillMatrix';
+import { MatchConfirmationCard } from '../matching/MatchConfirmationCard';
 import {
   BrainCircuit,
   Flame,
@@ -121,6 +122,9 @@ export const DashboardOverview: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Reciprocal Peer Match / Queue Widget */}
+      <MatchConfirmationCard />
 
       {/* Private Skill Matrix & Diagnostics */}
       <SkillMatrix />
