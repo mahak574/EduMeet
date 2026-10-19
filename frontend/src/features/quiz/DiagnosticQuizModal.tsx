@@ -8,8 +8,11 @@ import {
   ArrowRight,
   BrainCircuit,
   ShieldAlert,
+  LogIn,
 } from 'lucide-react';
 import { quizApi, CurrentQuestion, QuizResult } from '../../services/quizApi';
+import { useAuthStore } from '../../stores/authStore';
+import { AuthModal } from '../auth/AuthModal';
 
 interface DiagnosticQuizModalProps {
   isOpen: boolean;
@@ -24,6 +27,8 @@ export const DiagnosticQuizModal: React.FC<DiagnosticQuizModalProps> = ({
   subjectSlug,
   onComplete,
 }) => {
+  const { isAuthenticated } = useAuthStore();
+  const [authModalOpen, setAuthModalOpen] = useState(false);
   const [attemptId, setAttemptId] = useState<string | null>(null);
   const [currentQuestion, setCurrentQuestion] = useState<CurrentQuestion | null>(null);
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
@@ -41,12 +46,19 @@ export const DiagnosticQuizModal: React.FC<DiagnosticQuizModalProps> = ({
     setIsLoading(true);
     setErrorMsg(null);
     setQuizResult(null);
+
+    if (!isAuthenticated) {
+      setErrorMsg('Please log in to your account to calibrate your skills and start diagnostic assessment.');
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const data = await quizApi.startQuiz(subjectSlug);
       setAttemptId(data.attempt_id);
       loadNextQuestion(data.attempt_id);
     } catch (err: any) {
-      setErrorMsg(err.response?.data?.message || err.response?.data?.detail || 'Failed to start diagnostic.');
+      setErrorMsg(err.message || err.detail || 'Failed to start diagnostic.');
       setIsLoading(false);
     }
   }, [subjectSlug]);
@@ -61,11 +73,11 @@ export const DiagnosticQuizModal: React.FC<DiagnosticQuizModalProps> = ({
       startTimeRef.current = Date.now();
       setIsLoading(false);
     } catch (err: any) {
-      if (err.response?.status === 400 || err.response?.data?.detail?.includes('completed')) {
+      if (err.status === 400 || err.message?.toLowerCase().includes('completed')) {
         // Fetch results
         fetchResult(aId);
       } else {
-        setErrorMsg(err.response?.data?.detail || 'Failed to load question.');
+        setErrorMsg(err.message || 'Failed to load question.');
         setIsLoading(false);
       }
     }
@@ -78,7 +90,7 @@ export const DiagnosticQuizModal: React.FC<DiagnosticQuizModalProps> = ({
       setQuizResult(res);
       onComplete?.();
     } catch (err: any) {
-      setErrorMsg(err.response?.data?.detail || 'Failed to load results.');
+      setErrorMsg(err.message || 'Failed to load results.');
     } finally {
       setIsLoading(false);
     }
@@ -207,12 +219,22 @@ export const DiagnosticQuizModal: React.FC<DiagnosticQuizModalProps> = ({
               </div>
               <h3 className="text-lg font-bold text-white">Assessment Notice</h3>
               <p className="text-slate-300 text-sm max-w-md mx-auto">{errorMsg}</p>
-              <button
-                onClick={onClose}
-                className="px-6 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-medium transition-colors"
-              >
-                Close
-              </button>
+              <div className="flex items-center justify-center gap-3 pt-2">
+                <button
+                  onClick={onClose}
+                  className="px-6 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-medium transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+                {!isAuthenticated && (
+                  <button
+                    onClick={() => setAuthModalOpen(true)}
+                    className="px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium transition-all shadow-md shadow-brand-500/25 flex items-center gap-2 cursor-pointer"
+                  >
+                    <LogIn className="w-4 h-4" /> Log In / Sign Up
+                  </button>
+                )}
+              </div>
             </div>
           ) : quizResult ? (
             /* Results Screen */
@@ -359,6 +381,14 @@ export const DiagnosticQuizModal: React.FC<DiagnosticQuizModalProps> = ({
           </div>
         )}
       </div>
+
+      <AuthModal
+        isOpen={authModalOpen}
+        onClose={() => {
+          setAuthModalOpen(false);
+          initQuiz();
+        }}
+      />
     </div>
   );
 };

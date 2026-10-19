@@ -105,4 +105,30 @@ export const sessionApi = {
   async getSessionMessages(sessionId: string): Promise<ChatMessage[]> {
     return apiClient<ChatMessage[]>(`/sessions/${sessionId}/messages`);
   },
+
+  async getMySessions(): Promise<Array<{
+    session_id: string;
+    status: string;
+    session_mode: string;
+    my_role: string;
+    my_teach_subject: string;
+    my_teach_topic: string;
+    my_learn_subject: string;
+    my_learn_topic: string;
+    partner_name: string;
+    scheduled_start_utc: string;
+    scheduled_end_utc: string;
+  }>> {
+    return apiClient<Array<any>>('/sessions/my');
+  },
+
+  async createDemoSession(): Promise<{
+    session_id: string;
+    status: string;
+    message: string;
+  }> {
+    return apiClient<{ session_id: string; status: string; message: string }>('/sessions/demo', {
+      method: 'POST',
+    });
+  },
 };

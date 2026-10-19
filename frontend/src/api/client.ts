@@ -64,11 +64,31 @@ export async function apiClient<T>(
     }
   }
 
-  const json: APIResponse<T> = await response.json();
-
-  if (!response.ok || !json.success) {
-    throw new Error(json.error?.message || 'Request failed');
+  let json: any = null;
+  try {
+    json = await response.json();
+  } catch {
+    json = null;
   }
 
-  return json.data as T;
+  if (!response.ok || (json && json.success === false)) {
+    const errorMsg =
+      json?.detail ||
+      json?.error?.message ||
+      json?.message ||
+      (response.status === 401
+        ? 'Please log in to your account first.'
+        : response.status === 403
+        ? 'You do not have permission to perform this action.'
+        : response.status === 404
+        ? 'The requested resource was not found.'
+        : `Request failed with status ${response.status}`);
+
+    const error = new Error(errorMsg);
+    (error as any).status = response.status;
+    (error as any).detail = json?.detail;
+    throw error;
+  }
+
+  return (json?.data !== undefined ? json.data : json) as T;
 }

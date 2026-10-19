@@ -54,6 +54,79 @@ class SessionService:
         return session
 
     @classmethod
+    async def get_user_sessions(cls, user_id: PydanticObjectId) -> List[Dict[str, Any]]:
+        sessions = await Session.find(
+            {"participants.user_id": user_id}
+        ).sort("-scheduled_start_utc").to_list()
+
+        results = []
+        for s in sessions:
+            user_p = next((p for p in s.participants if p.user_id == user_id), None)
+            partner_p = next((p for p in s.participants if p.user_id != user_id), None)
+            partner_user = await User.get(partner_p.user_id) if partner_p else None
+            results.append({
+                "session_id": str(s.id),
+                "status": s.status,
+                "session_mode": s.session_mode,
+                "my_role": user_p.role if user_p else "teacher_a",
+                "my_teach_subject": user_p.teach_subject_slug if user_p else "",
+                "my_teach_topic": user_p.teach_topic_slug if user_p else "",
+                "my_learn_subject": user_p.learn_subject_slug if user_p else "",
+                "my_learn_topic": user_p.learn_topic_slug if user_p else "",
+                "partner_name": partner_user.full_name if partner_user else "Peer Student",
+                "scheduled_start_utc": s.scheduled_start_utc.isoformat() if s.scheduled_start_utc else "",
+                "scheduled_end_utc": s.scheduled_end_utc.isoformat() if s.scheduled_end_utc else "",
+            })
+        return results
+
+    @classmethod
+    async def create_demo_session(cls, user_id: PydanticObjectId, subject: str = "python") -> Session:
+        # Find or create a demo peer
+        peer = await User.find_one(User.email == "demo_peer@edumeet.org")
+        if not peer:
+            peer = User(
+                email="demo_peer@edumeet.org",
+                full_name="Jordan (Peer Mentor)",
+                age_confirmed=True,
+                country="US",
+                timezone="UTC",
+                role="student",
+                subjects_studied=["python", "dsa", "dbms"],
+            )
+            await peer.insert()
+
+        now = datetime.now(timezone.utc)
+        session = Session(
+            session_mode="text_chat",
+            status="waiting_room",
+            scheduled_start_utc=now,
+            scheduled_end_utc=now + timedelta(minutes=60),
+            video_room_id=f"edumeet-demo-{user_id}",
+            yjs_doc_id=f"edumeet-doc-{user_id}",
+            participants=[
+                SessionParticipant(
+                    user_id=user_id,
+                    role="teacher_a",
+                    teach_subject_slug=subject,
+                    teach_topic_slug="python-syntax-and-types",
+                    learn_subject_slug="dsa",
+                    learn_topic_slug="arrays-and-hashing",
+                ),
+                SessionParticipant(
+                    user_id=peer.id,
+                    role="teacher_b",
+                    teach_subject_slug="dsa",
+                    teach_topic_slug="arrays-and-hashing",
+                    learn_subject_slug=subject,
+                    learn_topic_slug="python-syntax-and-types",
+                ),
+            ],
+            present_user_ids=[user_id, peer.id],
+        )
+        await session.insert()
+        return session
+
+    @classmethod
     async def get_session_details(
         cls, session_id: PydanticObjectId, user_id: PydanticObjectId
     ) -> Dict[str, Any]:

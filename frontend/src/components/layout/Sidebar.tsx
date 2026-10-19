@@ -11,10 +11,10 @@ import {
 
 const NAV_ITEMS = [
   { to: '/', label: 'Overview', icon: LayoutDashboard, exact: true },
-  { to: '/diagnostic', label: 'Diagnostic Quizzes', icon: BrainCircuit, phase: 'Phase 2' },
-  { to: '/matching', label: 'Peer Matching', icon: Users2, phase: 'Phase 3' },
-  { to: '/sessions', label: 'Live Session Room', icon: Video, phase: 'Phase 4' },
-  { to: '/mistakes', label: 'Mistake Journal', icon: FileSpreadsheet, phase: 'Phase 6' },
+  { to: '/diagnostic', label: 'Diagnostic Quizzes', icon: BrainCircuit },
+  { to: '/matching', label: 'Peer Matching', icon: Users2 },
+  { to: '/sessions', label: 'Live Session Room', icon: Video },
+  { to: '/mistakes', label: 'Mistake Journal', icon: FileSpreadsheet },
   { to: '/profile', label: 'Profile & Goals', icon: UserIcon },
 ];
 
@@ -43,11 +43,6 @@ export const Sidebar: React.FC = () => {
               <Icon className="w-4 h-4" />
               <span>{item.label}</span>
             </div>
-            {item.phase && (
-              <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
-                {item.phase}
-              </span>
-            )}
           </NavLink>
         );
       })}

@@ -10,9 +10,12 @@ import {
 import { reviewApi, MistakeItem, ReviewScheduleItem } from '../../services/reviewApi';
 import { format } from 'date-fns';
 import { useAuthStore } from '../../stores/authStore';
+import { AuthModal } from '../auth/AuthModal';
+import { LogIn } from 'lucide-react';
 
 export const MistakeJournalView: React.FC = () => {
-  const { user } = useAuthStore();
+  const { user, isAuthenticated } = useAuthStore();
+  const [authModalOpen, setAuthModalOpen] = useState(false);
   const [mistakes, setMistakes] = useState<MistakeItem[]>([]);
   const [dueSchedules, setDueSchedules] = useState<ReviewScheduleItem[]>([]);
   const [selectedSubject, setSelectedSubject] = useState<string>('all');
@@ -20,6 +23,10 @@ export const MistakeJournalView: React.FC = () => {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   const fetchData = async () => {
+    if (!isAuthenticated) {
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     try {
       const [mList, dueList] = await Promise.all([
@@ -105,6 +112,15 @@ export const MistakeJournalView: React.FC = () => {
             Every incorrect answer from diagnostics, peer quizzes, and pre/post checks is scheduled for review using mathematical spacing intervals.
           </p>
         </div>
+
+        {!isAuthenticated && (
+          <button
+            onClick={() => setAuthModalOpen(true)}
+            className="px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer shadow-md shadow-brand-500/20 shrink-0"
+          >
+            <LogIn className="w-4 h-4" /> Log In to Sync Journal
+          </button>
+        )}
       </div>
 
       {actionMessage && (
@@ -272,6 +288,14 @@ export const MistakeJournalView: React.FC = () => {
           </div>
         )}
       </div>
+
+      <AuthModal
+        isOpen={authModalOpen}
+        onClose={() => {
+          setAuthModalOpen(false);
+          fetchData();
+        }}
+      />
     </div>
   );
 };

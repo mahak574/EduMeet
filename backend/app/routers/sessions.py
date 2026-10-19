@@ -38,6 +38,29 @@ class AdvancePhaseRequest(BaseModel):
     target_phase: Optional[str] = None
 
 
+@router.get("/my", response_model=APIResponse[List[dict]])
+async def get_my_sessions(
+    current_user: User = Depends(get_current_user),
+):
+    sessions = await SessionService.get_user_sessions(current_user.id)
+    return APIResponse(success=True, data=sessions)
+
+
+@router.post("/demo", response_model=APIResponse[dict])
+async def create_demo_session(
+    current_user: User = Depends(get_current_user),
+):
+    session = await SessionService.create_demo_session(current_user.id)
+    return APIResponse(
+        success=True,
+        data={
+            "session_id": str(session.id),
+            "status": session.status,
+            "message": "Demo session created successfully.",
+        },
+    )
+
+
 @router.get("/{session_id}", response_model=APIResponse[dict])
 async def get_session_details(
     session_id: PydanticObjectId,

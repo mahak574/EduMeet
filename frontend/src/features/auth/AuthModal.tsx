@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuthStore } from '../../stores/authStore';
-import { X, Mail, ShieldCheck, ArrowRight, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { X, Mail, ShieldCheck, ArrowRight, RefreshCw, CheckCircle2, Sparkles } from 'lucide-react';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -91,10 +91,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const handleGoogleMock = async () => {
     setLoading(true);
     try {
-      await googleLogin('mock_google_id_token_' + Date.now());
+      await googleLogin('mock_google_id_token_demo');
       onClose();
     } catch (err: any) {
-      setErrorMessage(err.message || 'Google sign in failed');
+      setErrorMessage(err.message || 'Quick sign in failed');
     } finally {
       setLoading(false);
     }
@@ -179,6 +179,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-800"></div></div>
               <span className="relative px-3 bg-slate-950 text-xs text-slate-500">or continue with</span>
             </div>
+
+            <button
+              type="button"
+              onClick={handleGoogleMock}
+              disabled={loading}
+              className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white text-sm font-semibold transition-all shadow-lg shadow-brand-500/20 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4 text-amber-300" />
+              ⚡ Instant Demo Login (Alex Rivera)
+            </button>
 
             <button
               type="button"

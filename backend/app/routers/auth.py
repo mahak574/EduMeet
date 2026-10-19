@@ -137,16 +137,17 @@ async def logout(
 @router.post("/google", response_model=APIResponse[AuthTokenResponse])
 async def google_auth(response: Response, payload: GoogleAuthRequest):
     # In development mode, accept mock Google login for seamless testing
-    email = f"user_{payload.id_token[:8]}@example.com" if not payload.id_token.startswith("ey") else "google_student@example.com"
+    email = "demo_student@example.com" if (not payload.id_token.startswith("ey") or "mock" in payload.id_token) else "google_student@example.com"
     user = await User.find_one(User.email == email)
     if not user:
         user = User(
             email=email,
-            full_name="Google Learner",
+            full_name="Alex Rivera",
             age_confirmed=True,
             country="US",
             timezone="UTC",
             role="student",
+            subjects_studied=["python", "dsa", "dbms"],
         )
         await user.insert()
 

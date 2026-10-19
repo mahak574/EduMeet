@@ -14,9 +14,12 @@ import {
 import { matchingApi, MatchResponse, PoolStatusResponse } from '../../services/matchingApi';
 import { format } from 'date-fns';
 import { useAuthStore } from '../../stores/authStore';
+import { AuthModal } from '../auth/AuthModal';
+import { LogIn } from 'lucide-react';
 
 export const MatchConfirmationCard: React.FC = () => {
-  const { user } = useAuthStore();
+  const { user, isAuthenticated } = useAuthStore();
+  const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
   const [poolStatus, setPoolStatus] = useState<PoolStatusResponse | null>(null);
   const [activeMatch, setActiveMatch] = useState<MatchResponse | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<string>('');
@@ -48,6 +51,11 @@ export const MatchConfirmationCard: React.FC = () => {
   }, []);
 
   const handleJoinPool = async () => {
+    if (!isAuthenticated) {
+      setAuthModalOpen(true);
+      return;
+    }
+
     setIsSubmitting(true);
     setActionMessage(null);
     try {
@@ -325,33 +333,65 @@ export const MatchConfirmationCard: React.FC = () => {
 
   // 3. STATE: Idle / Not in Matching Pool
   return (
-    <div className="glass-panel p-6 sm:p-8 rounded-3xl border border-white/10 bg-slate-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-      <div className="space-y-1.5 max-w-xl">
-        <div className="flex items-center gap-2">
-          <h3 className="text-lg font-bold text-white tracking-tight">Reciprocal Peer Teaching</h3>
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand-500/10 text-brand-400 border border-brand-500/20">
-            Phase 3 Matching
-          </span>
+    <div className="glass-panel p-6 sm:p-8 rounded-3xl border border-white/10 bg-slate-900/40 space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+        <div className="space-y-1.5 max-w-xl">
+          <div className="flex items-center gap-2">
+            <h3 className="text-lg font-bold text-white tracking-tight">Reciprocal Peer Teaching</h3>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand-500/10 text-brand-400 border border-brand-500/20">
+              Graph Matching Active
+            </span>
+          </div>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            Get paired for a 1-hour session: <strong>25 min</strong> you teach your strength, <strong>25 min</strong> your partner teaches theirs, followed by a <strong>10 min</strong> reciprocal peer quiz.
+          </p>
         </div>
-        <p className="text-xs text-slate-400 leading-relaxed">
-          Get paired for a 1-hour session: <strong>25 min</strong> you teach your strength, <strong>25 min</strong> your partner teaches theirs, followed by a <strong>10 min</strong> reciprocal peer quiz.
-        </p>
+
+        <button
+          type="button"
+          disabled={isSubmitting}
+          onClick={handleJoinPool}
+          className="px-6 py-3 rounded-2xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold tracking-wide transition-all shadow-lg shadow-brand-500/25 flex items-center justify-center gap-2 cursor-pointer shrink-0"
+        >
+          {isSubmitting ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : !isAuthenticated ? (
+            <>
+              <LogIn className="w-4 h-4" /> Log In to Join Matching Pool
+            </>
+          ) : (
+            <>
+              <Users className="w-4 h-4" /> Enter Matching Pool <ArrowRight className="w-4 h-4" />
+            </>
+          )}
+        </button>
       </div>
 
-      <button
-        type="button"
-        disabled={isSubmitting}
-        onClick={handleJoinPool}
-        className="px-6 py-3 rounded-2xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold tracking-wide transition-all shadow-lg shadow-brand-500/25 flex items-center justify-center gap-2 cursor-pointer shrink-0"
-      >
-        {isSubmitting ? (
-          <Loader2 className="w-4 h-4 animate-spin" />
-        ) : (
-          <>
-            <Users className="w-4 h-4" /> Enter Matching Pool <ArrowRight className="w-4 h-4" />
-          </>
-        )}
-      </button>
+      {actionMessage && (
+        <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+          <span>{actionMessage}</span>
+          {actionMessage.toLowerCase().includes('diagnostic') && (
+            <a
+              href="#skill-matrix"
+              onClick={() => {
+                const el = document.getElementById('skill-matrix') || document.querySelector('button[title*="Assessment"]');
+                el?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-bold border border-amber-500/30 text-center transition-all shrink-0 cursor-pointer"
+            >
+              Take Diagnostic Quiz →
+            </a>
+          )}
+        </div>
+      )}
+
+      <AuthModal
+        isOpen={authModalOpen}
+        onClose={() => {
+          setAuthModalOpen(false);
+          fetchData();
+        }}
+      />
     </div>
   );
 };
