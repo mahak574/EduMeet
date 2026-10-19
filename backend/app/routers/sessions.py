@@ -13,7 +13,7 @@ from fastapi import (
     status,
 )
 from pydantic import BaseModel
-
+from app.config import settings
 from app.core.dependencies import get_current_user
 from app.core.websocket_ticket import (
     WS_CLOSE_UNAUTHORIZED,
