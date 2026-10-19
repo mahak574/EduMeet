@@ -18,7 +18,9 @@ import { APIResponse } from '../../types';
 export const SkillMatrix: React.FC = () => {
   const { user, updateUser } = useAuthStore();
   const [skillsData, setSkillsData] = useState<SkillProfileData | null>(null);
-  const [selectedSubject, setSelectedSubject] = useState<string>('dsa');
+  const [selectedSubject, setSelectedSubject] = useState<string>(
+    user?.subjects_studied?.[0] || 'python'
+  );
   const [quizModalOpen, setQuizModalOpen] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [showAddSubject, setShowAddSubject] = useState<boolean>(false);
@@ -43,13 +45,21 @@ export const SkillMatrix: React.FC = () => {
   // Compute union of user's studied subjects and calibrated profile subjects
   const subjectsFromProfile = Object.keys(skillsData?.subjects || {});
   const subjectsFromUser = user?.subjects_studied || [];
+  const hasUserSubjects = subjectsFromUser.length > 0;
+  const hasProfileSubjects = subjectsFromProfile.length > 0;
+
+  // Strictly dynamic: Only fallback to ['python'] if user has no subjects selected at all
   const allSubjects = Array.from(
-    new Set([...subjectsFromUser, ...subjectsFromProfile, 'dsa', 'dbms'])
+    new Set([
+      ...subjectsFromUser,
+      ...subjectsFromProfile,
+      ...(!hasUserSubjects && !hasProfileSubjects ? ['python'] : []),
+    ])
   ).filter(Boolean);
 
-  // Keep selected subject valid
+  // Keep selected subject valid and synced with user's choices
   useEffect(() => {
-    if (!allSubjects.includes(selectedSubject) && allSubjects.length > 0) {
+    if (allSubjects.length > 0 && !allSubjects.includes(selectedSubject)) {
       setSelectedSubject(allSubjects[0]);
     }
   }, [allSubjects, selectedSubject]);

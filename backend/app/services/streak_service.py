@@ -32,7 +32,13 @@ class StreakService:
 
         user_sessions: List[Dict[str, Any]] = []
         for s in sessions:
-            if s.status not in ("cancelled", "no_show_cancelled"):
+            # Recorded only when user actually takes a live interactive session
+            was_conducted = (
+                s.status in ("closed", "teacher_a", "teacher_b", "quiz_exchange", "followup")
+                or s.actual_start_utc is not None
+            )
+            was_present = user_id in s.present_user_ids
+            if was_conducted and was_present and s.status not in ("cancelled", "no_show_cancelled"):
                 act_date = s.scheduled_start_utc.date() if s.scheduled_start_utc else s.created_at.date()
                 my_p = next((p for p in s.participants if p.user_id == user_id), None)
                 partner_p = next((p for p in s.participants if p.user_id != user_id), None)
@@ -76,27 +82,8 @@ class StreakService:
                 "date": m.created_at.date(),
             })
 
-        # Deterministic activity seed for brand-new demo users if 0 activity exists
-        # so they can see an interactive preview, but real sessions ALWAYS take precedence
-        has_real_activity = len(user_sessions) > 0 or len(user_quizzes) > 0
-        synthetic_sessions: List[Dict[str, Any]] = []
-        if not has_real_activity:
-            import hashlib
-            seed_hash = int(hashlib.md5(str(user_id).encode()).hexdigest(), 16)
-            # Create a couple of demonstration past sessions
-            for weeks_back in (1, 3, 5, 8):
-                demo_date = today - timedelta(days=weeks_back * 7 + (seed_hash % 3))
-                synthetic_sessions.append({
-                    "session_id": f"demo-prev-{weeks_back}",
-                    "date": demo_date,
-                    "teach_subject": "python" if weeks_back % 2 == 0 else "dsa",
-                    "teach_topic": "algorithms" if weeks_back % 2 == 0 else "binary-trees",
-                    "partner_name": "Jordan (Peer Mentor)",
-                    "status": "closed",
-                    "session_mode": "regular_30_30",
-                })
-
-        all_sessions = user_sessions + synthetic_sessions
+        # Strict real sessions only - no synthetic or fake demo past sessions
+        all_sessions = user_sessions
 
         # 4. Construct Calendar Months & 4-Week Activity Boxes
         months_data: List[Dict[str, Any]] = []
@@ -146,12 +133,9 @@ class StreakService:
                 is_past = (end_date < today)
                 is_future = (start_date > today)
 
-                # Intensity level: 0=none, 1=quiz only, 2=1 live session (green), 3=2 sessions, 4=3+ sessions
+                # Intensity level: green box (level >= 2) is awarded ONLY when user actually takes a live interactive session
                 if has_live:
                     level = min(4, 1 + live_cnt)
-                    month_active_weeks += 1
-                elif quiz_cnt > 0:
-                    level = 1
                     month_active_weeks += 1
                 else:
                     level = 0
@@ -209,7 +193,7 @@ class StreakService:
                 "weeks": weeks_list,
             })
 
-        # Calculate weekly streak (evaluated on calendar weeks)
+        # Calculate weekly streak (evaluated ONLY on calendar weeks with real live interactive sessions)
         current_streak = 0
         longest_streak = 0
         temp_streak = 0
@@ -225,7 +209,7 @@ class StreakService:
                     current_week_met = True
 
         for wk in all_weeks:
-            if wk["has_live_session"] or wk["level"] > 0:
+            if wk["has_live_session"]:
                 temp_streak += 1
                 if temp_streak > longest_streak:
                     longest_streak = temp_streak
@@ -237,7 +221,7 @@ class StreakService:
             if wk["is_current_week"] and not wk["has_live_session"]:
                 # Current week still underway, don't penalize streak yet
                 continue
-            if wk["has_live_session"] or wk["level"] > 0:
+            if wk["has_live_session"]:
                 current_streak += 1
             else:
                 break
@@ -261,11 +245,11 @@ class StreakService:
             cur_d += timedelta(days=1)
 
         return {
-            "total_contributions": total_contributions if has_real_activity else len(synthetic_sessions),
+            "total_contributions": total_contributions,
             "total_live_sessions": total_live_sessions,
-            "current_weekly_streak": current_streak if has_real_activity else 3,
-            "longest_weekly_streak": max(longest_streak, 5 if not has_real_activity else current_streak),
-            "streak_freezes_available": 1,
+            "current_weekly_streak": current_streak,
+            "longest_weekly_streak": longest_streak,
+            "streak_freezes_available": 1 if total_live_sessions > 0 else 0,
             "weekly_goal_met": current_week_met,
             "current_week_contributions": 1 if current_week_met else 0,
             "weekly_goal_target": 1,

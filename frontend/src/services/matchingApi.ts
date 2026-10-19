@@ -38,6 +38,26 @@ export interface MatchResponse {
   participants: MatchPartyInfo[];
 }
 
+export interface QueuePeerInfo {
+  user_id: string;
+  display_name: string;
+  country: string;
+  teaches_subjects: string[];
+  learns_subjects: string[];
+  teach_topics: string[];
+  learn_topics: string[];
+  waiting_minutes: number;
+  compatibility_label: string;
+  is_compatible: boolean;
+  is_me: boolean;
+}
+
+export interface PoolRosterResponse {
+  total_active_in_queue: number;
+  matching_algorithm: string;
+  peers: QueuePeerInfo[];
+}
+
 export const matchingApi = {
   async joinPool(subject_slugs?: string[]): Promise<PoolStatusResponse> {
     return apiClient<PoolStatusResponse>('/matching/pool/join', {
@@ -54,6 +74,10 @@ export const matchingApi = {
 
   async getPoolStatus(): Promise<PoolStatusResponse> {
     return apiClient<PoolStatusResponse>('/matching/pool/status');
+  },
+
+  async getLiveRoster(): Promise<PoolRosterResponse> {
+    return apiClient<PoolRosterResponse>('/matching/pool/live-roster');
   },
 
   async getActiveMatch(): Promise<MatchResponse | null> {
@@ -84,3 +108,4 @@ export const matchingApi = {
     });
   },
 };
+

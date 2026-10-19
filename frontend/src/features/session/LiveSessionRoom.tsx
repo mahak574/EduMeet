@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   Video,
   Mic,
@@ -19,15 +19,18 @@ import {
   ChevronRight,
   CheckCircle2,
   BookOpen,
+  LogOut,
 } from 'lucide-react';
 import { sessionApi, SessionDetails, PrecheckQuestion, ChatMessage } from '../../services/sessionApi';
 import { useAuthStore } from '../../stores/authStore';
+import { apiClient } from '../../api/client';
 import { PostSessionModal } from './PostSessionModal';
 import { AISessionPlanDrawer } from './AISessionPlanDrawer';
 import { ReportUserModal } from '../safety/ReportUserModal';
 
 export const LiveSessionRoom: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
+  const navigate = useNavigate();
   const { user } = useAuthStore();
 
   const [session, setSession] = useState<SessionDetails | null>(null);
@@ -35,11 +38,13 @@ export const LiveSessionRoom: React.FC = () => {
   const [postModalOpen, setPostModalOpen] = useState<boolean>(false);
   const [aiDrawerOpen, setAiDrawerOpen] = useState<boolean>(false);
   const [reportModalOpen, setReportModalOpen] = useState<boolean>(false);
+  const [leaveModalOpen, setLeaveModalOpen] = useState<boolean>(false);
   const [remainingSeconds, setRemainingSeconds] = useState<number>(1500);
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [partnerConnected, setPartnerConnected] = useState<boolean>(false);
   const [disconnectWarning, setDisconnectWarning] = useState<string | null>(null);
   const [audioOnly, setAudioOnly] = useState<boolean>(false);
+  const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'offline'>('connecting');
 
   // Collaboration State
   const [code, setCode] = useState<string>(
@@ -61,6 +66,7 @@ export const LiveSessionRoom: React.FC = () => {
 
   // Whiteboard Canvas State
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const whiteboardSnapshotRef = useRef<string | null>(null);
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
   const [penColor, setPenColor] = useState<string>('#38bdf8');
   const [penSize, setPenSize] = useState<number>(3);
@@ -102,6 +108,7 @@ export const LiveSessionRoom: React.FC = () => {
         const ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
+          if (isMounted) setWsStatus('connected');
           // Send periodic ping for clock sync
           const pingInterval = setInterval(() => {
             if (ws.readyState === WebSocket.OPEN) {
@@ -111,11 +118,44 @@ export const LiveSessionRoom: React.FC = () => {
           (ws as any)._pingInterval = pingInterval;
         };
 
+        ws.onerror = (err) => {
+          console.warn('Session WebSocket error:', err);
+          if (isMounted) setWsStatus('offline');
+        };
+
+        ws.onclose = () => {
+          if (isMounted) setWsStatus('offline');
+        };
+
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
             if (data.type === 'chat') {
-              setMessages((prev) => [...prev, data]);
+              const incomingId = data.message_id || data.id;
+              setMessages((prev) => {
+                const isDuplicate = prev.some(
+                  (m) =>
+                    (incomingId && m.id === incomingId) ||
+                    (m.content === data.content && m.sender_id === data.sender_id)
+                );
+                if (isDuplicate) {
+                  return prev.map((m) =>
+                    m.content === data.content && m.sender_id === data.sender_id
+                      ? { ...m, id: incomingId || m.id }
+                      : m
+                  );
+                }
+                return [
+                  ...prev,
+                  {
+                    id: incomingId,
+                    sender_id: data.sender_id,
+                    sender_name: data.sender_name,
+                    content: data.content,
+                    created_at: data.created_at,
+                  },
+                ];
+              });
             } else if (data.type === 'pong') {
               setRemainingSeconds(data.remaining_seconds);
               setIsPaused(data.is_paused);
@@ -145,12 +185,17 @@ export const LiveSessionRoom: React.FC = () => {
               }
             } else if (data.type === 'whiteboard_sync') {
               if (data.payload?.image) {
-                const img = new Image();
-                img.onload = () => {
-                  const ctx = canvasRef.current?.getContext('2d');
-                  ctx?.drawImage(img, 0, 0);
-                };
-                img.src = data.payload.image;
+                whiteboardSnapshotRef.current = data.payload.image;
+                const canvas = canvasRef.current;
+                if (canvas) {
+                  const ctx = canvas.getContext('2d');
+                  const img = new Image();
+                  img.onload = () => {
+                    ctx?.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx?.drawImage(img, 0, 0);
+                  };
+                  img.src = data.payload.image;
+                }
               }
             }
           } catch {
@@ -161,6 +206,7 @@ export const LiveSessionRoom: React.FC = () => {
         wsRef.current = ws;
       } catch (err) {
         console.error('Session init error:', err);
+        if (isMounted) setWsStatus('offline');
       }
     };
 
@@ -197,20 +243,85 @@ export const LiveSessionRoom: React.FC = () => {
     }
   };
 
-  const handleRunCode = () => {
-    setTerminalOutput(`[Evaluating ${codeLanguage.toUpperCase()}]\nRunning tests on sandbox...\nResult: [PASS] All sample test cases passed in 12ms.`);
+  const handleRunCode = async () => {
+    setTerminalOutput(`[Evaluating ${codeLanguage.toUpperCase()}]\nRunning on isolated execution sandbox...`);
+    try {
+      const res = await apiClient<{
+        language: string;
+        stdout: string;
+        stderr: string;
+        exit_code: number;
+        execution_time_ms: number;
+      }>('/sessions/execute-code', {
+        method: 'POST',
+        body: JSON.stringify({
+          code,
+          language: codeLanguage,
+        }),
+      });
+
+      let output = `[${res.language.toUpperCase()} Execution - ${res.execution_time_ms}ms]\n`;
+      if (res.stdout) {
+        output += `${res.stdout}\n`;
+      }
+      if (res.stderr) {
+        output += `\nErrors / Traceback:\n${res.stderr}\n`;
+      }
+      if (res.exit_code === 0 && !res.stderr) {
+        output += `\nProcess completed successfully (exit code 0).`;
+      } else if (res.exit_code !== 0) {
+        output += `\nProcess exited with code ${res.exit_code}.`;
+      }
+      setTerminalOutput(output.trim());
+    } catch (err: any) {
+      setTerminalOutput(`[Execution Sandbox Error]\n${err.message || 'Execution request failed'}`);
+    }
   };
 
-  // Send Chat Message
-  const handleSendMessage = () => {
-    if (!chatInput.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    wsRef.current.send(
-      JSON.stringify({
-        type: 'chat',
-        content: chatInput.trim(),
-      })
-    );
+  // Send Chat Message with Optimistic Update + WebSocket + REST Fallback
+  const handleSendMessage = async () => {
+    const trimmed = chatInput.trim();
+    if (!trimmed || !sessionId) return;
+
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMsg: ChatMessage = {
+      id: tempId,
+      sender_id: String(user?.id || ''),
+      sender_name: user?.full_name || 'Me',
+      content: trimmed,
+      created_at: new Date().toISOString(),
+    };
+
+    setMessages((prev) => [...prev, optimisticMsg]);
     setChatInput('');
+
+    let sentViaWs = false;
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(
+          JSON.stringify({
+            type: 'chat',
+            content: trimmed,
+          })
+        );
+        sentViaWs = true;
+      } catch (err) {
+        console.error('WS send error:', err);
+      }
+    }
+
+    if (!sentViaWs) {
+      try {
+        const saved = await sessionApi.sendMessage(sessionId, trimmed);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempId ? { ...m, id: saved.id || (saved as any).message_id || m.id } : m
+          )
+        );
+      } catch (err) {
+        console.error('REST message send error:', err);
+      }
+    }
   };
 
   // Submit Pre-check
@@ -373,6 +484,14 @@ export const LiveSessionRoom: React.FC = () => {
             title="Report Participant to Trust & Safety"
           >
             <ShieldAlert className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setLeaveModalOpen(true)}
+            className="px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+            title="Leave Classroom Session"
+          >
+            <LogOut className="w-3.5 h-3.5 text-rose-400" />
+            <span className="hidden sm:inline">Leave Room</span>
           </button>
           <button
             onClick={() => setChatOpen(!chatOpen)}
@@ -587,21 +706,23 @@ export const LiveSessionRoom: React.FC = () => {
             </div>
           )}
 
-          {/* Tab 2: Whiteboard Workspace */}
-          {activeTab === 'whiteboard' && (
-            <div className="flex-1 bg-slate-950 relative overflow-hidden flex items-center justify-center p-4">
-              <canvas
-                ref={canvasRef}
-                width={900}
-                height={550}
-                onMouseDown={startDrawing}
-                onMouseMove={draw}
-                onMouseUp={stopDrawing}
-                onMouseLeave={stopDrawing}
-                className="bg-slate-900 rounded-2xl border border-white/10 shadow-2xl cursor-crosshair max-w-full max-h-full"
-              />
-            </div>
-          )}
+          {/* Tab 2: Whiteboard Workspace (always mounted to preserve canvas buffer and sync) */}
+          <div
+            className={`flex-1 bg-slate-950 relative overflow-hidden flex items-center justify-center p-4 ${
+              activeTab === 'whiteboard' ? '' : 'hidden'
+            }`}
+          >
+            <canvas
+              ref={canvasRef}
+              width={900}
+              height={550}
+              onMouseDown={startDrawing}
+              onMouseMove={draw}
+              onMouseUp={stopDrawing}
+              onMouseLeave={stopDrawing}
+              className="bg-slate-900 rounded-2xl border border-white/10 shadow-2xl cursor-crosshair max-w-full max-h-full"
+            />
+          </div>
 
           {/* Tab 3: Pre-Check & Peer Quiz */}
           {activeTab === 'quiz' && (
@@ -672,7 +793,18 @@ export const LiveSessionRoom: React.FC = () => {
               <span className="flex items-center gap-1.5">
                 <MessageSquare className="w-3.5 h-3.5 text-brand-400" /> Session Chat
               </span>
-              <span className="text-[10px] text-slate-500">WebSocket Live</span>
+              <span className="flex items-center gap-1.5 text-[10px]">
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    wsStatus === 'connected'
+                      ? 'bg-emerald-400 shadow-sm shadow-emerald-400/50'
+                      : wsStatus === 'connecting'
+                      ? 'bg-amber-400 animate-pulse'
+                      : 'bg-rose-400'
+                  }`}
+                />
+                <span className="text-slate-400 capitalize">{wsStatus}</span>
+              </span>
             </div>
 
             {/* Chat Messages */}
@@ -685,12 +817,12 @@ export const LiveSessionRoom: React.FC = () => {
                 messages.map((m, idx) => {
                   const isMe = m.sender_id === String(user?.id);
                   return (
-                    <div key={idx} className={`space-y-1 ${isMe ? 'items-end' : 'items-start'}`}>
+                    <div key={idx} className={`flex flex-col space-y-1 ${isMe ? 'items-end' : 'items-start'}`}>
                       <div className="text-[10px] text-slate-500 px-1">{m.sender_name}</div>
                       <div
-                        className={`p-2.5 rounded-xl text-xs max-w-[85%] ${
+                        className={`p-2.5 rounded-xl text-xs max-w-[85%] break-words leading-relaxed ${
                           isMe
-                            ? 'bg-brand-600 text-white ml-auto'
+                            ? 'bg-brand-600 text-white ml-auto shadow-sm'
                             : 'bg-slate-800 text-slate-200 border border-white/5'
                         }`}
                       >
@@ -703,25 +835,73 @@ export const LiveSessionRoom: React.FC = () => {
             </div>
 
             {/* Chat Input Box */}
-            <div className="p-3 border-t border-white/10 flex gap-2">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSendMessage();
+              }}
+              className="p-3 border-t border-white/10 flex gap-2"
+            >
               <input
                 type="text"
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
                 placeholder="Type a message..."
                 className="flex-1 bg-slate-800 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-brand-500"
               />
               <button
-                onClick={handleSendMessage}
-                className="p-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white transition-all cursor-pointer shrink-0"
+                type="submit"
+                disabled={!chatInput.trim()}
+                className="p-2 rounded-xl bg-brand-600 hover:bg-brand-500 disabled:opacity-40 text-white transition-all cursor-pointer shrink-0"
               >
                 <Send className="w-3.5 h-3.5" />
               </button>
-            </div>
+            </form>
           </div>
         )}
       </div>
+
+      {/* Leave Room Confirmation Modal */}
+      {leaveModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-white/10 p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                <LogOut className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Leave Classroom Room?</h3>
+                <p className="text-xs text-slate-400">Exit the live collaborative session</p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed bg-slate-800/60 p-3 rounded-xl border border-white/5">
+              You can return to the session from your Sessions Hub at any time, or access your completed evaluation and lesson blueprints from your dashboard.
+            </p>
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setLeaveModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer"
+              >
+                Stay in Room
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (wsRef.current) {
+                    clearInterval((wsRef.current as any)._pingInterval);
+                    wsRef.current.close();
+                  }
+                  navigate('/sessions');
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 transition-all cursor-pointer shadow-lg shadow-rose-600/30"
+              >
+                Confirm & Leave
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Post-Session Evaluation Modal */}
       <PostSessionModal

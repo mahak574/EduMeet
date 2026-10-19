@@ -296,7 +296,7 @@ class Match(Document):
 
 class MatchingPoolEntry(Document):
     user_id: PydanticObjectId
-    subject_slugs: List[str] = Field(default_factory=lambda: ["dsa", "dbms"])
+    subject_slugs: List[str] = Field(default_factory=list)
     status: Literal["active", "matched", "cancelled"] = "active"
     entered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     current_match_id: Optional[PydanticObjectId] = None

@@ -106,6 +106,13 @@ export const sessionApi = {
     return apiClient<ChatMessage[]>(`/sessions/${sessionId}/messages`);
   },
 
+  async sendMessage(sessionId: string, content: string): Promise<ChatMessage> {
+    return apiClient<ChatMessage>(`/sessions/${sessionId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    });
+  },
+
   async getMySessions(): Promise<Array<{
     session_id: string;
     status: string;

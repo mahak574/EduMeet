@@ -10,32 +10,55 @@ import {
   Loader2,
   ShieldCheck,
   Video,
+  BookOpen,
+  GraduationCap,
+  Globe,
+  RefreshCw,
+  UserCheck,
+  LogIn,
 } from 'lucide-react';
-import { matchingApi, MatchResponse, PoolStatusResponse } from '../../services/matchingApi';
+import { matchingApi, MatchResponse, PoolStatusResponse, PoolRosterResponse, QueuePeerInfo } from '../../services/matchingApi';
 import { format } from 'date-fns';
 import { useAuthStore } from '../../stores/authStore';
 import { AuthModal } from '../auth/AuthModal';
-import { LogIn } from 'lucide-react';
 
 export const MatchConfirmationCard: React.FC = () => {
   const { user, isAuthenticated } = useAuthStore();
   const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
   const [poolStatus, setPoolStatus] = useState<PoolStatusResponse | null>(null);
   const [activeMatch, setActiveMatch] = useState<MatchResponse | null>(null);
+  const [roster, setRoster] = useState<PoolRosterResponse | null>(null);
+  const [isRosterLoading, setIsRosterLoading] = useState<boolean>(false);
   const [selectedSlot, setSelectedSlot] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
+  const fetchRoster = async () => {
+    setIsRosterLoading(true);
+    try {
+      const rosterData = await matchingApi.getLiveRoster();
+      setRoster(rosterData);
+    } catch {
+      // ignore
+    } finally {
+      setIsRosterLoading(false);
+    }
+  };
+
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const [poolRes, matchRes] = await Promise.all([
+      const [poolRes, matchRes, rosterRes] = await Promise.all([
         matchingApi.getPoolStatus(),
         matchingApi.getActiveMatch(),
+        matchingApi.getLiveRoster().catch(() => null),
       ]);
       setPoolStatus(poolRes);
       setActiveMatch(matchRes);
+      if (rosterRes) {
+        setRoster(rosterRes);
+      }
       if (matchRes?.proposed_slots && matchRes.proposed_slots.length > 0) {
         setSelectedSlot(matchRes.proposed_slots[0]);
       }
@@ -48,6 +71,11 @@ export const MatchConfirmationCard: React.FC = () => {
 
   useEffect(() => {
     fetchData();
+    // Refresh queue roster every 20 seconds to show active peers
+    const interval = setInterval(() => {
+      fetchRoster();
+    }, 20000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleJoinPool = async () => {
@@ -219,7 +247,7 @@ export const MatchConfirmationCard: React.FC = () => {
                 <Calendar className="w-3.5 h-3.5 text-brand-400" /> Select a Continuous Overlapping Time Slot:
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                {activeMatch.proposed_slots.map((slot) => {
+                {activeMatch.proposed_slots.map((slot: string) => {
                   const dt = new Date(slot);
                   const isSelected = selectedSlot === slot;
                   return (
@@ -294,10 +322,157 @@ export const MatchConfirmationCard: React.FC = () => {
     );
   }
 
+  // Render Helper: Live Active Peer Roster
+  const renderRosterSection = (_inPool: boolean) => (
+    <div className="space-y-3 pt-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1 border-b border-white/10">
+        <div className="flex items-center gap-2">
+          <div className="relative flex items-center justify-center">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping absolute" />
+            <span className="w-2 h-2 rounded-full bg-emerald-400 relative" />
+          </div>
+          <h4 className="text-sm font-bold text-white tracking-wide flex items-center gap-2">
+            <Users className="w-4 h-4 text-brand-400" />
+            Active Peers in Matching Pool ({roster?.total_active_in_queue ?? 0})
+          </h4>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
+            Reciprocal Bipartite Graph
+          </span>
+          <button
+            type="button"
+            onClick={fetchRoster}
+            disabled={isRosterLoading}
+            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer text-xs flex items-center gap-1"
+            title="Refresh active queue roster"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRosterLoading ? 'animate-spin text-brand-400' : ''}`} />
+            <span className="text-[10px]">Refresh</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Peer Cards List */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+        {roster?.peers && roster.peers.length > 0 ? (
+          roster.peers.map((peer: QueuePeerInfo) => {
+            return (
+              <div
+                key={peer.user_id}
+                className={`p-4 rounded-2xl border transition-all space-y-3 ${
+                  peer.is_me
+                    ? 'bg-brand-950/20 border-brand-500/40'
+                    : peer.is_compatible
+                    ? 'bg-slate-900/60 border-emerald-500/40 shadow-sm shadow-emerald-500/10'
+                    : 'bg-slate-900/40 border-white/10'
+                }`}
+              >
+                {/* Header: Peer info & Suitability Badge */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-brand-600 to-indigo-700 flex items-center justify-center font-bold text-xs text-white uppercase shadow-sm">
+                      {peer.display_name.charAt(0)}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-white">
+                          {peer.display_name}
+                        </span>
+                        {peer.is_me && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-brand-500/20 text-brand-300">
+                            YOU
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                        <span className="flex items-center gap-1">
+                          <Globe className="w-2.5 h-2.5" /> {peer.country}
+                        </span>
+                        <span>•</span>
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-2.5 h-2.5" /> Waiting {peer.waiting_minutes}m
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Compatibility Badge */}
+                  <div>
+                    {peer.is_compatible ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold">
+                        <Sparkles className="w-3 h-3 text-emerald-400" />
+                        Suitable for You
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-slate-400 text-[10px]">
+                        {peer.compatibility_label}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Subject Pairing Breakdown */}
+                <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-white/5">
+                  <div className="p-2.5 rounded-xl bg-emerald-950/20 border border-emerald-500/20 space-y-1">
+                    <div className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 uppercase tracking-wide">
+                      <GraduationCap className="w-3 h-3" />
+                      <span>Teaches</span>
+                    </div>
+                    <p className="font-bold text-white capitalize text-xs line-clamp-1">
+                      {peer.teaches_subjects.join(', ') || 'Diagnostic Calibrated'}
+                    </p>
+                    {peer.teach_topics.length > 0 && (
+                      <p className="text-[10px] text-slate-400 line-clamp-1 capitalize">
+                        {peer.teach_topics.slice(0, 2).map((t: string) => t.replace(/-/g, ' ')).join(', ')}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-amber-950/20 border border-amber-500/20 space-y-1">
+                    <div className="flex items-center gap-1 text-[10px] font-semibold text-amber-400 uppercase tracking-wide">
+                      <BookOpen className="w-3 h-3" />
+                      <span>Learns</span>
+                    </div>
+                    <p className="font-bold text-white capitalize text-xs line-clamp-1">
+                      {peer.learns_subjects.join(', ') || 'All Electives'}
+                    </p>
+                    {peer.learn_topics.length > 0 && (
+                      <p className="text-[10px] text-slate-400 line-clamp-1 capitalize">
+                        {peer.learn_topics.slice(0, 2).map((t: string) => t.replace(/-/g, ' ')).join(', ')}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Compatibility explanation */}
+                {peer.is_compatible && (
+                  <div className="text-[11px] text-emerald-300/90 flex items-center gap-1.5 pt-0.5">
+                    <UserCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>Reciprocal Fit: They teach what you need, and need what you teach.</span>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        ) : (
+          <div className="col-span-2 p-6 rounded-2xl bg-white/5 border border-white/10 text-center space-y-1.5">
+            <Users className="w-6 h-6 text-slate-400 mx-auto" />
+            <p className="text-xs text-white font-medium">No other students in the queue right now.</p>
+            <p className="text-[11px] text-slate-400">
+              Enter the pool to register your availability. You will be paired automatically when a reciprocal student joins.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   // 2. STATE: In Matching Pool (Waiting for algorithm run)
   if (poolStatus?.is_in_pool) {
     return (
-      <div className="glass-panel p-6 sm:p-8 rounded-3xl border border-brand-500/20 bg-slate-900/40 space-y-4">
+      <div className="glass-panel p-6 sm:p-8 rounded-3xl border border-brand-500/20 bg-slate-900/40 space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="relative flex items-center justify-center">
@@ -307,9 +482,14 @@ export const MatchConfirmationCard: React.FC = () => {
               </div>
             </div>
             <div>
-              <h3 className="text-lg font-bold text-white tracking-tight">Active in Matching Pool</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-bold text-white tracking-tight">Active in Matching Pool</h3>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  Ready for Pairings
+                </span>
+              </div>
               <p className="text-xs text-slate-400">
-                NetworkX graph algorithm searches every cycle for a student with complementary strengths.
+                Reciprocal Bipartite Graph matches you based on complementary skill gaps (25m teach / 25m learn / 10m quiz).
               </p>
             </div>
           </div>
@@ -327,13 +507,16 @@ export const MatchConfirmationCard: React.FC = () => {
         {actionMessage && (
           <p className="text-xs text-brand-300 pt-1">{actionMessage}</p>
         )}
+
+        {/* Live Active Peers & Compatibility View */}
+        {renderRosterSection(true)}
       </div>
     );
   }
 
   // 3. STATE: Idle / Not in Matching Pool
   return (
-    <div className="glass-panel p-6 sm:p-8 rounded-3xl border border-white/10 bg-slate-900/40 space-y-4">
+    <div className="glass-panel p-6 sm:p-8 rounded-3xl border border-white/10 bg-slate-900/40 space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
         <div className="space-y-1.5 max-w-xl">
           <div className="flex items-center gap-2">
@@ -384,6 +567,9 @@ export const MatchConfirmationCard: React.FC = () => {
           )}
         </div>
       )}
+
+      {/* Live Active Peers & Compatibility View */}
+      {renderRosterSection(false)}
 
       <AuthModal
         isOpen={authModalOpen}

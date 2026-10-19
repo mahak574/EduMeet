@@ -2,7 +2,7 @@ from typing import Optional
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_current_user_optional
 from app.models.consolidated import Match, User
 from app.schemas.matching import (
     MatchConfirmRequest,
@@ -12,6 +12,7 @@ from app.schemas.matching import (
     MatchResponse,
     PoolJoinRequest,
     PoolStatusResponse,
+    PoolRosterResponse,
 )
 from app.schemas.common import APIResponse
 from app.services.matching_service import MatchingService
@@ -64,6 +65,18 @@ async def get_matching_pool_status(
             status=entry.status,
         ),
     )
+
+
+@router.get("/pool/live-roster", response_model=APIResponse[PoolRosterResponse])
+async def get_matching_pool_live_roster(
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """
+    Returns real-time queue visibility for students:
+    Who is in queue, what subjects they teach and learn, and candidate suitability.
+    """
+    roster_data = await MatchingService.get_live_roster(current_user)
+    return APIResponse(success=True, data=PoolRosterResponse(**roster_data))
 
 
 @router.get("/status", response_model=APIResponse[Optional[MatchResponse]])

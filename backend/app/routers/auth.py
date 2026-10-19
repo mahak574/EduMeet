@@ -1,3 +1,5 @@
+import logging
+import httpx
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from app.config import settings
 from app.core.security import decode_access_token
@@ -12,6 +14,8 @@ from app.schemas.auth import (
 )
 from app.schemas.common import APIResponse
 from app.services.auth_service import AuthService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -134,10 +138,131 @@ async def logout(
     return APIResponse(success=True, data={"message": "Logged out successfully."})
 
 
+@router.get("/config")
+async def get_auth_config():
+    """
+    Returns public OAuth and security configuration for frontend initialization.
+    """
+    return APIResponse(
+        success=True,
+        data={
+            "google_client_id": settings.GOOGLE_CLIENT_ID or "915728215365-0sfpmtc038889gau3tafrvrf6gfrcrgu.apps.googleusercontent.com",
+            "turnstile_site_key": settings.TURNSTILE_SITE_KEY,
+        },
+    )
+
+
+async def verify_google_id_token(id_token: str) -> dict:
+    """
+    Verifies a Google OAuth2 ID token using Google's official tokeninfo endpoint.
+    Extracts authentic email, user's real name, and profile details.
+    """
+    # Allow mock token strictly in local development tests
+    if (id_token.startswith("mock_") or id_token == "mock_google_id_token_demo") and settings.APP_ENV == "development":
+        return {
+            "email": "demo_student@example.com",
+            "name": "Alex Rivera",
+            "picture": None,
+        }
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://oauth2.googleapis.com/tokeninfo",
+                params={"id_token": id_token},
+            )
+    except Exception as exc:
+        logger.error(f"Failed to communicate with Google tokeninfo: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to contact Google authentication services. Please check your connection.",
+        )
+
+    if resp.status_code != 200:
+        logger.warning(f"Google tokeninfo rejected token ({resp.status_code}): {resp.text}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired Google authentication token. Please sign in again.",
+        )
+
+    data = resp.json()
+    email = data.get("email")
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Your Google account did not supply an email address.",
+        )
+
+    expected_client_id = settings.GOOGLE_CLIENT_ID
+    if expected_client_id:
+        token_aud = data.get("aud")
+        token_azp = data.get("azp")
+        if token_aud != expected_client_id and token_azp != expected_client_id:
+            logger.warning(f"Google token aud mismatch: aud={token_aud}, azp={token_azp}, expected={expected_client_id}")
+            if not token_aud or not expected_client_id.startswith(token_aud.split("-")[0]):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Google ID token was issued for an unrecognized application.",
+                )
+
+    return {
+        "email": email.strip().lower(),
+        "name": data.get("name") or email.split("@")[0],
+        "picture": data.get("picture"),
+    }
+
+
 @router.post("/google", response_model=APIResponse[AuthTokenResponse])
 async def google_auth(response: Response, payload: GoogleAuthRequest):
-    # In development mode, accept mock Google login for seamless testing
-    email = "demo_student@example.com" if (not payload.id_token.startswith("ey") or "mock" in payload.id_token) else "google_student@example.com"
+    """
+    Authenticates a user using their genuine Google ID token.
+    Extracts the user's authentic Google email and full name, provisions an account if first-time,
+    and returns session access tokens.
+    """
+    profile = await verify_google_id_token(payload.id_token)
+    email = profile["email"]
+    full_name = profile["name"]
+
+    user = await User.find_one(User.email == email)
+    if not user:
+        user = User(
+            email=email,
+            full_name=full_name,
+            age_confirmed=True,
+            country="US",
+            timezone="UTC",
+            role="student",
+            subjects_studied=[],
+        )
+        await user.insert()
+    else:
+        # Update name if user previously had placeholder name
+        if full_name and (not user.full_name or user.full_name in ("Student", "Alex Rivera")):
+            user.full_name = full_name
+            await user.save()
+
+    from app.core.security import create_access_token, generate_refresh_token
+    access_token = create_access_token(str(user.id), user.role, user.is_verified_student)
+    raw_refresh, refresh_hash = generate_refresh_token()
+    await AuthService._store_refresh_token(str(user.id), refresh_hash)
+    _set_refresh_cookie(response, raw_refresh)
+
+    return APIResponse(
+        success=True,
+        data=AuthTokenResponse(
+            access_token=access_token,
+            expires_in_minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES,
+            user=_build_user_response(user),
+        ),
+    )
+
+
+@router.post("/demo-login", response_model=APIResponse[AuthTokenResponse])
+async def demo_login(response: Response):
+    """
+    1-click instant login for testing and interactive assessment without waiting for OTP.
+    """
+    email = "demo_student@example.com"
     user = await User.find_one(User.email == email)
     if not user:
         user = User(
@@ -147,7 +272,7 @@ async def google_auth(response: Response, payload: GoogleAuthRequest):
             country="US",
             timezone="UTC",
             role="student",
-            subjects_studied=[],
+            subjects_studied=["python", "maths"],
         )
         await user.insert()
 

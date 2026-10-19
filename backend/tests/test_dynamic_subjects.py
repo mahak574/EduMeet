@@ -212,3 +212,34 @@ async def test_dynamic_multi_subject_peer_matching():
     subj_a, topic_a, subj_b, topic_b, gain = pair
     assert gain > 0.0
     assert (subj_a == "operating-systems" and subj_b == "python") or (subj_a == "python" and subj_b == "operating-systems")
+
+
+@pytest.mark.asyncio
+async def test_math_curriculum_and_practical_questions():
+    """Validates that mathematical subjects generate genuine practical calculations and not CS templates."""
+    # 1. Test General Maths
+    topics = await AIQuestionGenerator.ensure_questions_for_subject("maths", target_per_topic=2)
+    assert len(topics) == 4
+    math_qs = await Question.find(Question.subject_slug == "maths").to_list()
+    assert len(math_qs) >= 8
+
+    # Verify that prompts contain real math terms and NO CS template jargon
+    cs_jargon = ["operational invariants", "space complexity", "window minimize", "global locks"]
+    for q in math_qs:
+        assert not any(jargon in q.prompt_text.lower() for jargon in cs_jargon)
+
+    # 2. Test Commerce / CA Mathematics
+    ca_topics = await AIQuestionGenerator.ensure_questions_for_subject("maths-commerce-ca", target_per_topic=2)
+    assert len(ca_topics) == 4
+    ca_qs = await Question.find(Question.subject_slug == "maths-commerce-ca").to_list()
+    assert len(ca_qs) >= 8
+    # Must have practical financial calculations
+    assert any("annuity" in q.prompt_text.lower() or "interest" in q.prompt_text.lower() or "revenue" in q.prompt_text.lower() for q in ca_qs)
+
+    # 3. Test Class 11-12 Mathematics
+    h_topics = await AIQuestionGenerator.ensure_questions_for_subject("maths-class-11-12", target_per_topic=2)
+    assert len(h_topics) == 4
+    h_qs = await Question.find(Question.subject_slug == "maths-class-11-12").to_list()
+    assert len(h_qs) >= 8
+    assert any("derivative" in q.prompt_text.lower() or "integral" in q.prompt_text.lower() or "determinant" in q.prompt_text.lower() for q in h_qs)
+

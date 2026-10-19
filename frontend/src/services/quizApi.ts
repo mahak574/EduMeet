@@ -22,6 +22,20 @@ export interface CurrentQuestion {
   is_completed?: boolean;
 }
 
+export interface QuestionReviewItem {
+  question_id: string;
+  prompt_text: string;
+  code_snippet?: string;
+  options: QuestionOption[];
+  selected_option_id?: string;
+  correct_option_id: string;
+  is_correct: boolean;
+  timed_out: boolean;
+  explanation: string;
+  topic_slug: string;
+  difficulty: string;
+}
+
 export interface QuizResult {
   attempt_id: string;
   subject_slug: string;
@@ -34,6 +48,11 @@ export interface QuizResult {
     score: number;
     confidence_level: string;
   }>;
+  total_questions?: number;
+  correct_answers_count?: number;
+  incorrect_answers_count?: number;
+  timed_out_count?: number;
+  questions_review?: QuestionReviewItem[];
 }
 
 export interface SkillDetail {

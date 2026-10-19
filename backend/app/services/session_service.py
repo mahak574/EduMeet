@@ -80,7 +80,13 @@ class SessionService:
         return results
 
     @classmethod
-    async def create_demo_session(cls, user_id: PydanticObjectId, subject: str = "python") -> Session:
+    async def create_demo_session(cls, user_id: PydanticObjectId, subject: Optional[str] = None) -> Session:
+        # Determine subjects dynamically based on current user's profile
+        current_user = await User.get(user_id)
+        studied = current_user.subjects_studied if current_user and current_user.subjects_studied else []
+        teach_sub = subject or (studied[0] if studied else "maths")
+        learn_sub = studied[1] if len(studied) > 1 else ("python" if teach_sub != "python" else "physics")
+
         # Find or create a demo peer
         peer = await User.find_one(User.email == "demo_peer@edumeet.org")
         if not peer:
@@ -91,7 +97,7 @@ class SessionService:
                 country="US",
                 timezone="UTC",
                 role="student",
-                subjects_studied=["python", "dsa", "dbms"],
+                subjects_studied=[teach_sub, learn_sub],
             )
             await peer.insert()
 
@@ -109,18 +115,18 @@ class SessionService:
                 SessionParticipant(
                     user_id=user_id,
                     role="teacher_a",
-                    teach_subject_slug=subject,
-                    teach_topic_slug="python-syntax-and-types",
-                    learn_subject_slug="dsa",
-                    learn_topic_slug="arrays-and-hashing",
+                    teach_subject_slug=teach_sub,
+                    teach_topic_slug=f"{teach_sub}-core-concepts",
+                    learn_subject_slug=learn_sub,
+                    learn_topic_slug=f"{learn_sub}-core-concepts",
                 ),
                 SessionParticipant(
                     user_id=peer.id,
                     role="teacher_b",
-                    teach_subject_slug="dsa",
-                    teach_topic_slug="arrays-and-hashing",
-                    learn_subject_slug=subject,
-                    learn_topic_slug="python-syntax-and-types",
+                    teach_subject_slug=learn_sub,
+                    teach_topic_slug=f"{learn_sub}-core-concepts",
+                    learn_subject_slug=teach_sub,
+                    learn_topic_slug=f"{teach_sub}-core-concepts",
                 ),
             ],
             present_user_ids=[user_id, peer.id],

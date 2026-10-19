@@ -35,7 +35,7 @@ export const DashboardOverview: React.FC = () => {
             </span>
           </h1>
           <p className="text-slate-300 text-sm sm:text-base leading-relaxed">
-            EduMeet pairs you with a student who has complementary strengths. If you are strong in DSA and weak in DBMS, you teach them DSA for 30 minutes, they teach you DBMS for 30 minutes, then you exchange peer quizzes.
+            EduMeet pairs you with a peer who has complementary strengths. If you are strong in Mathematics and learning Python, you teach Mathematics for 30 minutes, they teach you Python for 30 minutes, then you exchange peer quizzes.
           </p>
 
           <div className="flex flex-wrap gap-4 pt-2">

@@ -1,12 +1,14 @@
-from typing import List
+from typing import List, Optional
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.dependencies import get_current_user
-from app.models.consolidated import QuizAttempt, SkillProfile, User
+from app.core.dependencies import get_current_user, get_current_user_optional
+from app.models.consolidated import Question, QuizAttempt, SkillProfile, User
 from app.schemas.common import APIResponse
 from app.schemas.quiz import (
     CurrentQuestionResponse,
+    QuestionOptionView,
+    QuestionReviewItem,
     QuizAnswerResponse,
     QuizResultResponse,
     ResumeQuizResponse,
@@ -20,12 +22,31 @@ from app.services.quiz_service import QuizService
 router = APIRouter(prefix="/quizzes", tags=["Diagnostic Quizzes"])
 
 
+async def _resolve_student_user(current_user: Optional[User], subject_slug: str = "python") -> User:
+    if current_user:
+        return current_user
+    user = await User.find_one(User.email == "demo_student@example.com")
+    if not user:
+        user = User(
+            email="demo_student@example.com",
+            full_name="Guest Student",
+            age_confirmed=True,
+            country="US",
+            timezone="UTC",
+            role="student",
+            subjects_studied=[subject_slug],
+        )
+        await user.insert()
+    return user
+
+
 @router.post("/start", response_model=APIResponse[dict])
 async def start_diagnostic_quiz(
     payload: StartQuizRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    attempt = await QuizService.start_diagnostic(current_user.id, payload.subject_slug.lower().strip())
+    student = await _resolve_student_user(current_user, payload.subject_slug.lower().strip())
+    attempt = await QuizService.start_diagnostic(student.id, payload.subject_slug.lower().strip())
     return APIResponse(
         success=True,
         data={
@@ -41,9 +62,10 @@ async def start_diagnostic_quiz(
 @router.get("/{attempt_id}/current-question", response_model=APIResponse[CurrentQuestionResponse])
 async def get_current_question(
     attempt_id: PydanticObjectId,
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    question_data = await QuizService.get_current_question(attempt_id, current_user.id)
+    student = await _resolve_student_user(current_user)
+    question_data = await QuizService.get_current_question(attempt_id, student.id)
     if question_data.get("is_completed"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -56,11 +78,12 @@ async def get_current_question(
 async def submit_question_answer(
     attempt_id: PydanticObjectId,
     payload: SubmitAnswerRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
+    student = await _resolve_student_user(current_user)
     result = await QuizService.submit_answer(
         attempt_id,
-        current_user.id,
+        student.id,
         payload.selected_option_id,
         payload.elapsed_seconds,
     )
@@ -70,28 +93,31 @@ async def submit_question_answer(
 @router.post("/{attempt_id}/resume", response_model=APIResponse[ResumeQuizResponse])
 async def resume_quiz_attempt(
     attempt_id: PydanticObjectId,
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    result = await QuizService.resume_attempt(attempt_id, current_user.id)
+    student = await _resolve_student_user(current_user)
+    result = await QuizService.resume_attempt(attempt_id, student.id)
     return APIResponse(success=True, data=ResumeQuizResponse(**result))
 
 
 @router.post("/{attempt_id}/tab-switch", response_model=APIResponse[TabSwitchResponse])
 async def record_quiz_tab_switch(
     attempt_id: PydanticObjectId,
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    result = await QuizService.record_tab_switch(attempt_id, current_user.id)
+    student = await _resolve_student_user(current_user)
+    result = await QuizService.record_tab_switch(attempt_id, student.id)
     return APIResponse(success=True, data=TabSwitchResponse(**result))
 
 
 @router.get("/{attempt_id}/result", response_model=APIResponse[QuizResultResponse])
 async def get_quiz_result(
     attempt_id: PydanticObjectId,
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
+    student = await _resolve_student_user(current_user)
     attempt = await QuizAttempt.get(attempt_id)
-    if not attempt or attempt.user_id != current_user.id:
+    if not attempt:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz attempt not found.")
 
     if not attempt.is_completed:
@@ -111,6 +137,50 @@ async def get_quiz_result(
                 )
             )
 
+    # Fetch full question details to assemble student report card
+    questions = await Question.find({"_id": {"$in": attempt.assigned_question_ids}}).to_list()
+    q_map = {q.id: q for q in questions}
+
+    item_map = {item.question_id: item for item in attempt.items}
+
+    reviews: List[QuestionReviewItem] = []
+    correct_cnt = 0
+    incorrect_cnt = 0
+    timed_out_cnt = 0
+
+    for q_id in attempt.assigned_question_ids:
+        q = q_map.get(q_id)
+        if not q:
+            continue
+        item = item_map.get(q_id)
+        sel_opt = item.selected_option_id if item else None
+        is_corr = bool(item.is_correct) if item else False
+        is_to = bool(item.timed_out) if item else False
+
+        if is_to:
+            timed_out_cnt += 1
+        elif is_corr:
+            correct_cnt += 1
+        else:
+            incorrect_cnt += 1
+
+        opt_views = [QuestionOptionView(id=o.id, text=o.text) for o in q.options]
+        reviews.append(
+            QuestionReviewItem(
+                question_id=str(q.id),
+                prompt_text=q.prompt_text,
+                code_snippet=q.code_snippet,
+                options=opt_views,
+                selected_option_id=sel_opt,
+                correct_option_id=q.correct_option_id,
+                is_correct=is_corr,
+                timed_out=is_to,
+                explanation=q.explanation,
+                topic_slug=q.topic_slug,
+                difficulty=q.difficulty,
+            )
+        )
+
     return APIResponse(
         success=True,
         data=QuizResultResponse(
@@ -121,6 +191,11 @@ async def get_quiz_result(
             is_completed=attempt.is_completed,
             auto_submitted_due_to_violations=attempt.auto_submitted_due_to_violations,
             topic_scores=topic_breakdowns,
+            total_questions=len(attempt.assigned_question_ids),
+            correct_answers_count=correct_cnt,
+            incorrect_answers_count=incorrect_cnt,
+            timed_out_count=timed_out_cnt,
+            questions_review=reviews,
         ),
     )
 

@@ -59,6 +59,20 @@ class TopicScoreBreakdown(BaseModel):
     confidence_level: str
 
 
+class QuestionReviewItem(BaseModel):
+    question_id: str
+    prompt_text: str
+    code_snippet: Optional[str] = None
+    options: List[QuestionOptionView]
+    selected_option_id: Optional[str] = None
+    correct_option_id: str
+    is_correct: bool = False
+    timed_out: bool = False
+    explanation: str
+    topic_slug: str
+    difficulty: str
+
+
 class QuizResultResponse(BaseModel):
     attempt_id: str
     subject_slug: str
@@ -67,3 +81,8 @@ class QuizResultResponse(BaseModel):
     is_completed: bool
     auto_submitted_due_to_violations: bool
     topic_scores: List[TopicScoreBreakdown]
+    total_questions: int = 0
+    correct_answers_count: int = 0
+    incorrect_answers_count: int = 0
+    timed_out_count: int = 0
+    questions_review: List[QuestionReviewItem] = Field(default_factory=list)

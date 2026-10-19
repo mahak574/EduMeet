@@ -118,38 +118,14 @@ export const WeeklyStreakHeatmap: React.FC = () => {
           const year = new Date().getFullYear();
           const fallbackMonths = generateFallbackMonths(year);
 
-          // Mark a few demo active weeks if fallback
-          fallbackMonths.forEach((mo) => {
-            if (mo.month_number <= currentMonthNum) {
-              mo.weeks.forEach((wk, wIdx) => {
-                if (wIdx === 0 || wIdx === 2) {
-                  wk.has_live_session = true;
-                  wk.live_sessions_count = 1;
-                  wk.level = 2;
-                  wk.activities = [
-                    {
-                      type: 'live_session',
-                      title: 'Live Collaborative Session: Python & DSA',
-                      topic: 'Arrays and Two-Pointers',
-                      partner: 'Jordan (Peer Mentor)',
-                      date: wk.start_date,
-                      status: 'Completed',
-                    },
-                  ];
-                }
-              });
-              mo.active_weeks_count = mo.weeks.filter((w) => w.has_live_session).length;
-            }
-          });
-
           setData({
-            total_contributions: 14,
-            total_live_sessions: 8,
-            current_weekly_streak: 4,
-            longest_weekly_streak: 7,
-            streak_freezes_available: 1,
-            weekly_goal_met: true,
-            current_week_contributions: 1,
+            total_contributions: 0,
+            total_live_sessions: 0,
+            current_weekly_streak: 0,
+            longest_weekly_streak: 0,
+            streak_freezes_available: 0,
+            weekly_goal_met: false,
+            current_week_contributions: 0,
             weekly_goal_target: 1,
             year,
             months: fallbackMonths,

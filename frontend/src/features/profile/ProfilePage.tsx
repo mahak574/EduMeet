@@ -55,7 +55,7 @@ export const ProfilePage: React.FC = () => {
   const [timezone, setTimezone] = useState(user.timezone || 'UTC');
   const [teachingStyle, setTeachingStyle] = useState(user.preferences?.preferred_teaching_style || 'example_heavy');
   const [learningGoals, setLearningGoals] = useState<string[]>(user.preferences?.learning_goals || ['Tech Placements & Interviews']);
-  const [subjects, setSubjects] = useState<string[]>(user.subjects_studied.length ? user.subjects_studied : ['dsa', 'dbms']);
+  const [subjects, setSubjects] = useState<string[]>(user.subjects_studied.length ? user.subjects_studied : ['maths', 'python']);
   const [newSubject, setNewSubject] = useState('');
   const [instEmail, setInstEmail] = useState('');
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -260,7 +260,7 @@ export const ProfilePage: React.FC = () => {
             <BookOpen className="w-5 h-5 text-brand-400" /> Subjects Studied
           </h2>
           <p className="text-xs text-slate-400">
-            Enter topics or subjects you either want to learn or teach (e.g. <code>dbms</code>, <code>dsa</code>, <code>operating-systems</code>).
+            Enter topics or subjects you either want to learn or teach (e.g. <code>maths</code>, <code>physics</code>, <code>python</code>).
           </p>
 
           <div className="flex flex-wrap gap-2 pt-2">

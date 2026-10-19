@@ -12,6 +12,7 @@ interface AuthState {
   sendOtp: (email: string, turnstileToken: string) => Promise<void>;
   verifyOtp: (email: string, code: string) => Promise<void>;
   googleLogin: (idToken: string) => Promise<void>;
+  demoLogin: () => Promise<void>;
   updateUser: (user: User) => void;
   logout: () => Promise<void>;
   clearError: () => void;
@@ -63,6 +64,19 @@ export const useAuthStore = create<AuthState>((set) => ({
     });
     setAccessToken(res.access_token);
     set({ user: res.user, isAuthenticated: true });
+  },
+
+  demoLogin: async () => {
+    set({ error: null, isLoading: true });
+    try {
+      const res = await apiClient<AuthTokenResponse>('/auth/demo-login', {
+        method: 'POST',
+      });
+      setAccessToken(res.access_token);
+      set({ user: res.user, isAuthenticated: true, isLoading: false });
+    } catch (err: any) {
+      set({ error: err.message || 'Demo login failed', isLoading: false });
+    }
   },
 
   updateUser: (user: User) => {

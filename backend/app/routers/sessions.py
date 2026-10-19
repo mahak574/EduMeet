@@ -1,5 +1,10 @@
+import asyncio
 import json
 import logging
+import os
+import sys
+import tempfile
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from beanie import PydanticObjectId
@@ -30,12 +35,120 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
 
 
+class ExecuteCodeRequest(BaseModel):
+    code: str
+    language: str = "python"
+
+
 class PrecheckSubmitRequest(BaseModel):
     answers: Dict[str, str]  # question_id -> selected_option_id
 
 
 class AdvancePhaseRequest(BaseModel):
     target_phase: Optional[str] = None
+
+
+class SendMessageRequest(BaseModel):
+    content: str
+
+
+@router.post("/execute-code", response_model=APIResponse[dict])
+async def execute_code(
+    payload: ExecuteCodeRequest,
+):
+    """
+    Executes student Python / JS code in an isolated subprocess with 6-second timeout.
+    Returns real stdout, stderr, execution time, and exit code.
+    """
+    lang = (payload.language or "python").lower()
+    code = payload.code or ""
+    start_time = time.perf_counter()
+    temp_path = None
+
+    if lang in ["python", "py", "python3"]:
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, encoding="utf-8") as f:
+            f.write(code)
+            temp_path = f.name
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                temp_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout_data, stderr_data = await asyncio.wait_for(process.communicate(), timeout=6.0)
+                exit_code = process.returncode
+                stdout_str = stdout_data.decode("utf-8", errors="replace")
+                stderr_str = stderr_data.decode("utf-8", errors="replace")
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.communicate()
+                exit_code = 124
+                stdout_str = ""
+                stderr_str = "Execution Timeout: Code exceeded maximum runtime limit (6.0 seconds)."
+        except Exception as e:
+            exit_code = 1
+            stdout_str = ""
+            stderr_str = f"Execution failed: {str(e)}"
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
+
+    elif lang in ["javascript", "js", "typescript", "ts"]:
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
+            f.write(code)
+            temp_path = f.name
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "node",
+                temp_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout_data, stderr_data = await asyncio.wait_for(process.communicate(), timeout=6.0)
+                exit_code = process.returncode
+                stdout_str = stdout_data.decode("utf-8", errors="replace")
+                stderr_str = stderr_data.decode("utf-8", errors="replace")
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.communicate()
+                exit_code = 124
+                stdout_str = ""
+                stderr_str = "Execution Timeout: Code exceeded maximum runtime limit (6.0 seconds)."
+        except Exception as e:
+            exit_code = 1
+            stdout_str = ""
+            stderr_str = f"Execution failed: {str(e)}"
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
+    else:
+        exit_code = 1
+        stdout_str = ""
+        stderr_str = f"Unsupported language '{lang}'. Supported: python, javascript."
+
+    elapsed_ms = round((time.perf_counter() - start_time) * 1000, 1)
+
+    return APIResponse(
+        success=True,
+        data={
+            "language": lang,
+            "stdout": stdout_str,
+            "stderr": stderr_str,
+            "exit_code": exit_code,
+            "execution_time_ms": elapsed_ms,
+        },
+    )
 
 
 @router.get("/my", response_model=APIResponse[List[dict]])
@@ -227,6 +340,29 @@ async def get_session_messages(
         for m in msgs
     ]
     return APIResponse(success=True, data=formatted)
+
+
+@router.post("/{session_id}/messages", response_model=APIResponse[dict])
+async def send_session_message(
+    session_id: PydanticObjectId,
+    req: SendMessageRequest,
+    current_user: User = Depends(get_current_user),
+):
+    session = await SessionService.get_session(session_id)
+    is_part = any(p.user_id == current_user.id for p in session.participants)
+    if not is_part:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Participant not found.")
+
+    clean_content = req.content.strip()
+    if not clean_content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message cannot be empty.")
+
+    chat_msg = await ws_manager.handle_chat_message(str(session_id), str(current_user.id), clean_content)
+    if "error" in chat_msg:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=chat_msg["error"])
+
+    await ws_manager.broadcast(str(session_id), chat_msg)
+    return APIResponse(success=True, data=chat_msg)
 
 
 @router.websocket("/ws/{session_id}")
