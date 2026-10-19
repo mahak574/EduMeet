@@ -2,10 +2,16 @@ from datetime import datetime, timezone
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status
 from app.core.dependencies import get_current_user
-from app.models.consolidated import Report, SkillProfile, TelemetryEvent, User, validate_slug
+from app.models.consolidated import Report, Session, SkillProfile, TelemetryEvent, User, validate_slug
 from app.schemas.auth import UserResponse
 from app.schemas.common import APIResponse
+from app.schemas.portfolio import (
+    BadgeResponse,
+    PublicPortfolioResponse,
+    UpdatePortfolioRequest,
+)
 from app.schemas.profile import DataExportResponse, UpdateProfileRequest, VerifyStudentRequest
+from app.services.badge_service import BadgeService
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -172,3 +178,108 @@ async def delete_my_account(current_user: User = Depends(get_current_user)):
         success=True,
         data={"message": "Account, profile data, and telemetry events permanently purged."},
     )
+
+
+@router.patch("/me/portfolio", response_model=APIResponse[dict])
+async def update_my_portfolio(
+    data: UpdatePortfolioRequest,
+    current_user: User = Depends(get_current_user),
+):
+    if data.portfolio_slug is not None:
+        cleaned_slug = validate_slug(data.portfolio_slug)
+        existing = await User.find_one(User.portfolio_slug == cleaned_slug)
+        if existing and existing.id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"The portfolio slug '{cleaned_slug}' is already taken. Please choose another.",
+            )
+        current_user.portfolio_slug = cleaned_slug
+
+    current_user.portfolio_is_public = data.portfolio_is_public
+    await current_user.save()
+
+    return APIResponse(
+        success=True,
+        message="Portfolio preferences updated successfully.",
+        data={
+            "portfolio_slug": current_user.portfolio_slug,
+            "portfolio_is_public": current_user.portfolio_is_public,
+        },
+    )
+
+
+@router.get("/me/badges", response_model=APIResponse[List[BadgeResponse]])
+async def get_my_badges(
+    current_user: User = Depends(get_current_user),
+):
+    await BadgeService.evaluate_user_milestones(current_user.id)
+    badges = await BadgeService.get_user_badges(current_user.id)
+    return APIResponse(success=True, data=badges)
+
+
+@router.get("/portfolio/{slug}", response_model=APIResponse[PublicPortfolioResponse])
+async def get_public_portfolio(slug: str):
+    cleaned_slug = validate_slug(slug)
+    user = await User.find_one(User.portfolio_slug == cleaned_slug)
+    if not user or not user.is_active or not user.portfolio_is_public:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Public teaching portfolio not found.",
+        )
+
+    # Evaluate milestones
+    await BadgeService.evaluate_user_milestones(user.id)
+    badges = await BadgeService.get_user_badges(user.id)
+
+    distinct_count = len(user.distinct_partners)
+    partner_diversity_unlocked = distinct_count >= 5
+
+    avg_clarity = None
+    avg_helpfulness = None
+    notice = None
+
+    if not partner_diversity_unlocked:
+        notice = f"Verified peer ratings unlock after completing sessions with 5 distinct study partners (current: {distinct_count}/5). This policy prevents reciprocal score inflation."
+    else:
+        # Calculate true verified peer ratings
+        closed_sessions = await Session.find({
+            "status": "closed",
+            "participants.user_id": user.id,
+        }).to_list()
+
+        clarities = []
+        helpfuls = []
+        for s in closed_sessions:
+            partner_p = next((p for p in s.participants if p.user_id != user.id), None)
+            if partner_p and partner_p.rating_given:
+                c = partner_p.rating_given.get("clarity")
+                h = partner_p.rating_given.get("helpfulness")
+                if c is not None:
+                    clarities.append(float(c))
+                if h is not None:
+                    helpfuls.append(float(h))
+
+        if clarities:
+            avg_clarity = round(sum(clarities) / len(clarities), 2)
+        if helpfuls:
+            avg_helpfulness = round(sum(helpfuls) / len(helpfuls), 2)
+
+    portfolio_data = PublicPortfolioResponse(
+        full_name=user.full_name,
+        country=user.country,
+        timezone=user.timezone,
+        portfolio_slug=user.portfolio_slug,
+        is_public=user.portfolio_is_public,
+        is_verified_student=user.is_verified_student,
+        is_mentor=user.is_mentor,
+        completed_sessions_count=user.completed_sessions_count,
+        distinct_partners_count=distinct_count,
+        partner_diversity_unlocked=partner_diversity_unlocked,
+        teaching_subjects=user.subjects_studied,
+        badges=badges,
+        average_clarity_rating=avg_clarity,
+        average_helpfulness_rating=avg_helpfulness,
+        notice=notice,
+    )
+
+    return APIResponse(success=True, data=portfolio_data)

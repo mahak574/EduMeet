@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     JAAS_API_KEY: Optional[str] = None
     JAAS_PRIVATE_KEY_PEM: Optional[str] = None
 
+    # AI Coach & Lesson Plan
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_MODEL: str = "gpt-4o-mini"
+
     @property
     def is_production(self) -> bool:
         return self.APP_ENV == "production"
