@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { sessionApi, SessionDetails, PrecheckQuestion, ChatMessage } from '../../services/sessionApi';
 import { useAuthStore } from '../../stores/authStore';
+import { PostSessionModal } from './PostSessionModal';
 
 export const LiveSessionRoom: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -28,6 +29,7 @@ export const LiveSessionRoom: React.FC = () => {
 
   const [session, setSession] = useState<SessionDetails | null>(null);
   const [activeTab, setActiveTab] = useState<'editor' | 'whiteboard' | 'quiz'>('editor');
+  const [postModalOpen, setPostModalOpen] = useState<boolean>(false);
   const [remainingSeconds, setRemainingSeconds] = useState<number>(1500);
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [partnerConnected, setPartnerConnected] = useState<boolean>(false);
@@ -340,8 +342,14 @@ export const LiveSessionRoom: React.FC = () => {
         {/* Right: Quick Role & Action */}
         <div className="flex items-center gap-3">
           <button
+            onClick={() => setPostModalOpen(true)}
+            className="px-3 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-brand-500/20"
+          >
+            <Sparkles className="w-3.5 h-3.5" /> Evaluate Session
+          </button>
+          <button
             onClick={() => sessionApi.advancePhase(session.session_id)}
-            className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-white/10 hover:border-white/20 text-slate-300 text-xs font-medium transition-all"
+            className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-white/10 hover:border-white/20 text-slate-300 text-xs font-medium transition-all cursor-pointer"
             title="Advance Phase (Testing / Mutual Agreement)"
           >
             Advance <ChevronRight className="w-3.5 h-3.5" />
@@ -694,6 +702,15 @@ export const LiveSessionRoom: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Post-Session Evaluation Modal */}
+      <PostSessionModal
+        isOpen={postModalOpen}
+        onClose={() => setPostModalOpen(false)}
+        sessionId={session.session_id}
+        partnerName={session.partner_name}
+        learnedTopic={session.my_learn_topic}
+      />
     </div>
   );
 };
