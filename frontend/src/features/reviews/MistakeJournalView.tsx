@@ -9,8 +9,10 @@ import {
 } from 'lucide-react';
 import { reviewApi, MistakeItem, ReviewScheduleItem } from '../../services/reviewApi';
 import { format } from 'date-fns';
+import { useAuthStore } from '../../stores/authStore';
 
 export const MistakeJournalView: React.FC = () => {
+  const { user } = useAuthStore();
   const [mistakes, setMistakes] = useState<MistakeItem[]>([]);
   const [dueSchedules, setDueSchedules] = useState<ReviewScheduleItem[]>([]);
   const [selectedSubject, setSelectedSubject] = useState<string>('all');
@@ -193,18 +195,20 @@ export const MistakeJournalView: React.FC = () => {
           </div>
 
           {/* Subject Filter Tabs */}
-          <div className="flex gap-2">
-            {['all', 'dsa', 'dbms'].map((subj) => (
+          <div className="flex gap-2 flex-wrap">
+            {Array.from(
+              new Set(['all', ...mistakes.map((m) => m.subject_slug), ...(user?.subjects_studied || [])])
+            ).filter(Boolean).map((subj) => (
               <button
                 key={subj}
                 onClick={() => setSelectedSubject(subj)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer capitalize ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer uppercase tracking-wider ${
                   selectedSubject === subj
-                    ? 'bg-brand-500/20 text-brand-300 border border-brand-500/30'
-                    : 'text-slate-400 hover:text-white'
+                    ? 'bg-brand-500/20 text-brand-300 border border-brand-500/30 shadow-md'
+                    : 'text-slate-400 hover:text-white bg-slate-900/30'
                 }`}
               >
-                {subj}
+                {subj.replace(/-/g, ' ')}
               </button>
             ))}
           </div>

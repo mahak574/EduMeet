@@ -13,7 +13,9 @@ from app.models.consolidated import (
     SkillSnapshot,
     TopicSkill,
     User,
+    validate_slug,
 )
+from app.services.ai_question_generator import AIQuestionGenerator, KNOWN_SUBJECT_TOPICS
 
 logger = logging.getLogger(__name__)
 
@@ -76,18 +78,29 @@ class QuizService:
         return served
 
     @staticmethod
+    def get_topic_classification(score: float) -> str:
+        """
+        Classifies topic mastery:
+        >= 70.0% -> 'proficient' (strong topic, verified ready to teach)
+        < 70.0%  -> 'learning_target' (weak topic, target for practice/peer tutoring)
+        """
+        return "proficient" if score >= 70.0 else "learning_target"
+
+    @staticmethod
     async def can_start_diagnostic(user_id: PydanticObjectId, subject_slug: str) -> Tuple[bool, Optional[str]]:
         """
         Validates the 3-attempt quota and the 7-day cooldown (measured from completed_at
-        or expires_at for abandoned attempts).
+        or expires_at for abandoned attempts) for any dynamic subject.
         """
-        if subject_slug not in SUBJECT_TOPICS:
-            return False, f"Subject '{subject_slug}' is not supported in Phase 2. Allowed: {list(SUBJECT_TOPICS.keys())}"
+        try:
+            cleaned_subject = validate_slug(subject_slug)
+        except ValueError as val_err:
+            return False, str(val_err)
 
         # Fetch past attempts sorted descending
         attempts = await QuizAttempt.find(
             QuizAttempt.user_id == user_id,
-            QuizAttempt.subject_slug == subject_slug,
+            QuizAttempt.subject_slug == cleaned_subject,
         ).sort("-started_at").to_list()
 
         # Check 3-attempt limit
@@ -101,7 +114,7 @@ class QuizService:
             latest_expires = _ensure_utc(latest.expires_at)
             # If an attempt is currently in progress and not expired, user should resume it
             if not latest.is_completed and latest_expires and now < latest_expires:
-                return False, f"You have an active in-progress attempt for {subject_slug}. Please resume it."
+                return False, f"You have an active in-progress attempt for {cleaned_subject}. Please resume it."
 
             # Calculate 7-day cooldown reference point
             cooldown_reference = _ensure_utc(latest.completed_at if latest.is_completed else latest.expires_at)
@@ -118,20 +131,23 @@ class QuizService:
         """
         Samples 15-20 questions (3-4 per topic across difficulty tiers), excludes previously
         served questions, handles post-exhaustion repeats, and initializes the QuizAttempt.
+        Dynamically supports any subject and topic entered by the user.
         """
-        can_start, reason = await QuizService.can_start_diagnostic(user_id, subject_slug)
+        cleaned_subject = validate_slug(subject_slug)
+        can_start, reason = await QuizService.can_start_diagnostic(user_id, cleaned_subject)
         if not can_start:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=reason)
 
-        topics = SUBJECT_TOPICS[subject_slug]
-        previously_served = await QuizService.get_all_served_question_ids(user_id, subject_slug)
+        # Ensure topics and dynamic questions exist for this subject
+        topics = await AIQuestionGenerator.ensure_questions_for_subject(cleaned_subject, target_per_topic=4)
+        previously_served = await QuizService.get_all_served_question_ids(user_id, cleaned_subject)
 
         selected_questions: List[Tuple[Question, bool]] = []  # (Question, repeat_exposure)
 
         for topic in topics:
             # Query approved questions for this topic
             all_topic_questions = await Question.find(
-                Question.subject_slug == subject_slug,
+                Question.subject_slug == cleaned_subject,
                 Question.topic_slug == topic,
                 Question.review_status == "approved",
             ).to_list()

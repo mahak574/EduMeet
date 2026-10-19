@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class PoolJoinRequest(BaseModel):
-    subject_slugs: List[str] = Field(default_factory=lambda: ["dsa", "dbms"])
+    subject_slugs: Optional[List[str]] = Field(default=None, description="Optional subjects to match for; defaults to user's studied subjects")
 
 
 class PoolStatusResponse(BaseModel):

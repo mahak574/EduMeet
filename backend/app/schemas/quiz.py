@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 
 class StartQuizRequest(BaseModel):
-    subject_slug: str = Field(..., description="'dsa' or 'dbms'")
+    subject_slug: str = Field(..., description="Subject slug e.g. 'dsa', 'dbms', 'operating-systems', 'python', etc.")
 
 
 class QuestionOptionView(BaseModel):

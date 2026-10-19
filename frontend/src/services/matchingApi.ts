@@ -39,10 +39,10 @@ export interface MatchResponse {
 }
 
 export const matchingApi = {
-  async joinPool(subject_slugs: string[] = ['dsa', 'dbms']): Promise<PoolStatusResponse> {
+  async joinPool(subject_slugs?: string[]): Promise<PoolStatusResponse> {
     return apiClient<PoolStatusResponse>('/matching/pool/join', {
       method: 'POST',
-      body: JSON.stringify({ subject_slugs }),
+      body: JSON.stringify({ subject_slugs: subject_slugs || null }),
     });
   },
 

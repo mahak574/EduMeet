@@ -14,7 +14,7 @@ import { quizApi, CurrentQuestion, QuizResult } from '../../services/quizApi';
 interface DiagnosticQuizModalProps {
   isOpen: boolean;
   onClose: () => void;
-  subjectSlug: 'dsa' | 'dbms';
+  subjectSlug: string;
   onComplete?: () => void;
 }
 

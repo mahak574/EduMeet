@@ -13,8 +13,10 @@ import {
 } from 'lucide-react';
 import { matchingApi, MatchResponse, PoolStatusResponse } from '../../services/matchingApi';
 import { format } from 'date-fns';
+import { useAuthStore } from '../../stores/authStore';
 
 export const MatchConfirmationCard: React.FC = () => {
+  const { user } = useAuthStore();
   const [poolStatus, setPoolStatus] = useState<PoolStatusResponse | null>(null);
   const [activeMatch, setActiveMatch] = useState<MatchResponse | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<string>('');
@@ -49,7 +51,8 @@ export const MatchConfirmationCard: React.FC = () => {
     setIsSubmitting(true);
     setActionMessage(null);
     try {
-      const res = await matchingApi.joinPool(['dsa', 'dbms']);
+      const subjects = user?.subjects_studied?.length ? user.subjects_studied : undefined;
+      const res = await matchingApi.joinPool(subjects);
       setPoolStatus(res);
       setActionMessage('You have joined the matching queue! Pairings run automatically.');
     } catch (err: any) {

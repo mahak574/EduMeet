@@ -62,6 +62,7 @@ class MatchingService:
         best_reciprocal_gain = 0.0
         best_pair: Optional[Tuple[str, str, str, str, float]] = None
 
+        # 1. First, search intra-subject complementary pairs across all common subjects
         for subject in common_subjects:
             topics_a = profile_a.subjects.get(subject, {})
             topics_b = profile_b.subjects.get(subject, {})
@@ -95,6 +96,36 @@ class MatchingService:
                     if reciprocal_gain > best_reciprocal_gain:
                         best_reciprocal_gain = reciprocal_gain
                         best_pair = (subject, topic_a, subject, topic_b, reciprocal_gain)
+
+        # 2. If no intra-subject pair met the threshold, or to find global cross-subject maximum:
+        # Evaluate cross-subject pairs across all calibrated subjects in both profiles
+        for subj_a, topics_a in profile_a.subjects.items():
+            for subj_b, topics_b in profile_b.subjects.items():
+                if subj_a == subj_b:
+                    continue  # Intra-subject handled above
+
+                # Check if student B studies subj_a, and student A studies subj_b
+                b_topics_in_subj_a = profile_b.subjects.get(subj_a, {})
+                a_topics_in_subj_b = profile_a.subjects.get(subj_b, {})
+
+                for topic_a, skill_a in topics_a.items():
+                    score_a_teaches = skill_a.score
+                    score_b_learns = b_topics_in_subj_a.get(topic_a).score if topic_a in b_topics_in_subj_a else 50.0
+                    gain_a_to_b = cls.calculate_topic_gain(score_a_teaches, score_b_learns)
+                    if gain_a_to_b <= 0.0:
+                        continue
+
+                    for topic_b, skill_b in topics_b.items():
+                        score_b_teaches = skill_b.score
+                        score_a_learns = a_topics_in_subj_b.get(topic_b).score if topic_b in a_topics_in_subj_b else 50.0
+                        gain_b_to_a = cls.calculate_topic_gain(score_b_teaches, score_a_learns)
+                        if gain_b_to_a <= 0.0:
+                            continue
+
+                        reciprocal_gain = min(gain_a_to_b, gain_b_to_a)
+                        if reciprocal_gain > best_reciprocal_gain:
+                            best_reciprocal_gain = reciprocal_gain
+                            best_pair = (subj_a, topic_a, subj_b, topic_b, reciprocal_gain)
 
         return best_pair
 
@@ -246,7 +277,14 @@ class MatchingService:
             )
 
         # Subjects to match for
-        chosen_subjects = subject_slugs or ["dsa", "dbms"]
+        if subject_slugs:
+            chosen_subjects = [validate_slug(s) for s in subject_slugs]
+        elif user.subjects_studied:
+            chosen_subjects = user.subjects_studied
+        elif profile and profile.subjects:
+            chosen_subjects = list(profile.subjects.keys())
+        else:
+            chosen_subjects = []
 
         # Check existing active match
         active_match = await cls.get_active_match(user_id)
