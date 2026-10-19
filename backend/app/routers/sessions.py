@@ -50,15 +50,22 @@ async def get_my_sessions(
 async def create_demo_session(
     current_user: User = Depends(get_current_user),
 ):
-    session = await SessionService.create_demo_session(current_user.id)
-    return APIResponse(
-        success=True,
-        data={
-            "session_id": str(session.id),
-            "status": session.status,
-            "message": "Demo session created successfully.",
-        },
-    )
+    try:
+        session = await SessionService.create_demo_session(current_user.id)
+        return APIResponse(
+            success=True,
+            data={
+                "session_id": str(session.id),
+                "status": session.status,
+                "message": "Demo session created successfully.",
+            },
+        )
+    except Exception as e:
+        logger.exception("Error creating demo session: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unable to create demo session: {str(e)}",
+        )
 
 
 @router.get("/{session_id}", response_model=APIResponse[dict])

@@ -97,10 +97,12 @@ class SessionService:
 
         now = datetime.now(timezone.utc)
         session = Session(
-            session_mode="text_chat",
+            match_id=PydanticObjectId(),
+            session_mode="regular_30_30",
             status="waiting_room",
             scheduled_start_utc=now,
             scheduled_end_utc=now + timedelta(minutes=60),
+            phase_ends_at=now + timedelta(minutes=25),
             video_room_id=f"edumeet-demo-{user_id}",
             yjs_doc_id=f"edumeet-doc-{user_id}",
             participants=[

@@ -305,3 +305,24 @@ async def test_waiting_room_precheck_flow():
     assert snap is not None
     assert snap.source_type == "pre_session"
     assert snap.score == 66.7
+
+
+@pytest.mark.asyncio
+async def test_create_demo_session():
+    """Validates that create_demo_session creates a functional demo session and peer."""
+    user = User(email="learner@test.com", full_name="Learner", age_confirmed=True, country="US")
+    await user.insert()
+
+    demo_session = await SessionService.create_demo_session(user.id, subject="python")
+    assert demo_session is not None
+    assert demo_session.status == "waiting_room"
+    assert demo_session.session_mode == "regular_30_30"
+    assert len(demo_session.participants) == 2
+    assert any(p.user_id == user.id for p in demo_session.participants)
+
+    # Validate details can be fetched
+    details = await SessionService.get_session_details(demo_session.id, user.id)
+    assert details["session_id"] == str(demo_session.id)
+    assert details["partner_name"] == "Jordan (Peer Mentor)"
+    assert details["remaining_seconds"] > 0
+

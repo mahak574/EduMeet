@@ -17,6 +17,7 @@ from app.models.consolidated import (
     SessionParticipant,
     SkillProfile,
     User,
+    validate_slug,
 )
 from app.services.availability_service import (
     compute_contiguous_overlap_minutes,

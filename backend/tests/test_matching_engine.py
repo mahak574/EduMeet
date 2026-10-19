@@ -369,3 +369,31 @@ async def test_match_decline_restores_partner():
     assert p1_after.status == "cancelled"
     assert p2_after.status == "active"
     assert p2_after.current_match_id is None
+
+
+@pytest.mark.asyncio
+async def test_join_pool_with_subject_slugs():
+    """Validates that join_pool validates slug and adds user to pool."""
+    user = User(
+        email="pooljoiner@example.com",
+        full_name="Pool Joiner",
+        age_confirmed=True,
+        country="US",
+        timezone="UTC",
+    )
+    await user.insert()
+
+    profile = SkillProfile(
+        user_id=user.id,
+        subjects={
+            "dsa": {"arrays": TopicSkill(overall_score=75.0)},
+        },
+    )
+    await profile.insert()
+
+    entry = await MatchingService.join_pool(user.id, subject_slugs=["dsa", "python"])
+    assert entry is not None
+    assert entry.status == "active"
+    assert "dsa" in entry.subject_slugs
+    assert "python" in entry.subject_slugs
+

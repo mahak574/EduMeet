@@ -363,7 +363,7 @@ class SessionParticipant(BaseModel):
 
 
 class Session(Document):
-    match_id: PydanticObjectId
+    match_id: Optional[PydanticObjectId] = None
     session_mode: Literal["regular_30_30", "instant_help", "mock_interview", "silent_costudy", "project_buddy"] = "regular_30_30"
     status: Literal[
         "scheduled",
