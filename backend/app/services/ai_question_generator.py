@@ -1016,34 +1016,44 @@ class AIQuestionGenerator:
         For coding subjects, pulls real executable code snippets and output prediction questions.
         Uses configured LLM (e.g., Gemini free tier) if applicable.
         """
+        questions: List[Question] = []
         # If mathematics domain, use practical math question bank first
         if cls.is_math_subject(subject_slug):
             math_qs = cls._generate_practical_math_questions(subject_slug, topic_slug, count)
             if math_qs and len(math_qs) >= count:
-                return math_qs
+                questions = math_qs
 
         # If coding domain, use practical python/coding question bank first
-        if cls.is_coding_subject(subject_slug):
+        elif cls.is_coding_subject(subject_slug):
             code_qs = cls._generate_practical_coding_questions(subject_slug, topic_slug, count)
             if code_qs and len(code_qs) >= count:
-                return code_qs
+                questions = code_qs
 
         # Check if an LLM provider is configured (e.g. Gemini free tier)
-        if getattr(settings, "GEMINI_API_KEY", None) or getattr(settings, "OPENAI_API_KEY", None):
+        elif getattr(settings, "GEMINI_API_KEY", None) or getattr(settings, "OPENAI_API_KEY", None):
             try:
                 ai_questions = await cls._generate_via_llm(subject_slug, topic_slug, count)
                 if ai_questions and len(ai_questions) >= count:
-                    return ai_questions
+                    questions = ai_questions
             except Exception as exc:
                 logger.warning("LLM question generation failed, using pedagogical generator: %s", exc)
 
-        if cls.is_math_subject(subject_slug):
-            return cls._generate_practical_math_questions(subject_slug, topic_slug, count)
+        if not questions or len(questions) < count:
+            if cls.is_math_subject(subject_slug):
+                questions = cls._generate_practical_math_questions(subject_slug, topic_slug, count)
+            elif cls.is_coding_subject(subject_slug):
+                questions = cls._generate_practical_coding_questions(subject_slug, topic_slug, count)
+            else:
+                questions = cls._generate_pedagogical_template_questions(subject_slug, topic_slug, count)
 
-        if cls.is_coding_subject(subject_slug):
-            return cls._generate_practical_coding_questions(subject_slug, topic_slug, count)
-
-        return cls._generate_pedagogical_template_questions(subject_slug, topic_slug, count)
+        # Enforce balanced distribution: 25% A, 25% B, 25% C, 25% D
+        from app.services.question_bank import rebalance_options_to_target
+        for i, q in enumerate(questions):
+            target_slot = ["A", "B", "C", "D"][i % 4]
+            q.options, q.correct_option_id = rebalance_options_to_target(
+                q.options, q.correct_option_id, target_slot
+            )
+        return questions
 
     @classmethod
     def _generate_practical_coding_questions(
@@ -1139,7 +1149,7 @@ class AIQuestionGenerator:
             f"Requirements:\n"
             f"- Question difficulty distribution: easy, medium, hard.\n"
             f"- 4 options (id: 'A', 'B', 'C', 'D') with clear numerical or conceptual text.\n"
-            f"- One unambiguous correct_option_id.\n"
+            f"- One unambiguous correct_option_id. Ensure the correct answer is evenly distributed across options 'A', 'B', 'C', and 'D' (~25% each; avoid clustering on 'A' or 'B').\n"
             f"- Clear pedagogical explanation demonstrating the derivation.\n"
             f"- No irrelevant computer science terms if subject is mathematics.\n"
             f"Return JSON format: {{\"questions\": [{{\"difficulty\": \"easy|medium|hard\", \"prompt_text\": \"...\", \"code_snippet\": null, \"options\": [{{\"id\": \"A\", \"text\": \"...\"}}], \"correct_option_id\": \"A\", \"explanation\": \"...\"}}]}}"
@@ -1222,23 +1232,23 @@ class AIQuestionGenerator:
             {
                 "prompt": f"Which critical failure mode or edge case must be safeguarded against when implementing {readable_topic}?",
                 "options": [
-                    {"id": "A", "text": "Zero-division or empty/null input boundary conditions"},
-                    {"id": "B", "text": "Operating system desktop window minimize events"},
-                    {"id": "C", "text": "Monospaced font rendering discrepancies"},
+                    {"id": "A", "text": "Operating system desktop window minimize events"},
+                    {"id": "B", "text": "Monospaced font rendering discrepancies"},
+                    {"id": "C", "text": "Zero-division or empty/null input boundary conditions"},
                     {"id": "D", "text": "HTTP GET cache header expiration without network disconnects"},
                 ],
-                "correct": "A",
+                "correct": "C",
                 "explanation": "Defensive design requires validating boundary states such as empty collections, null pointers, and divide-by-zero states.",
             },
             {
                 "prompt": f"How does architectural modularity in {readable_topic} improve long-term system reliability?",
                 "options": [
                     {"id": "A", "text": "By increasing coupling between unrelated stateful modules"},
-                    {"id": "B", "text": "By isolating concerns, enabling targeted unit testing, and minimizing blast radius"},
-                    {"id": "C", "text": "By enforcing synchronous single-threaded execution across distributed nodes"},
-                    {"id": "D", "text": "By converting all dynamic data structures into fixed global variables"},
+                    {"id": "B", "text": "By enforcing synchronous single-threaded execution across distributed nodes"},
+                    {"id": "C", "text": "By converting all dynamic data structures into fixed global variables"},
+                    {"id": "D", "text": "By isolating concerns, enabling targeted unit testing, and minimizing blast radius"},
                 ],
-                "correct": "B",
+                "correct": "D",
                 "explanation": "Separation of concerns reduces coupling, narrows fault domains, and makes components easier to test and reason about.",
             },
         ]

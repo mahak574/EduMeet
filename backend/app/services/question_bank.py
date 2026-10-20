@@ -524,11 +524,96 @@ SEED_QUESTIONS: List[Dict[str, Any]] = [
 ]
 
 
+def rebalance_options_to_target(options: list, correct_option_id: str, target_slot: str) -> tuple[list, str]:
+    """
+    Rebalances option ordering so that the correct option is placed at target_slot ('A', 'B', 'C', or 'D')
+    while preserving distractors and option text accuracy.
+    Works with both lists of dicts and lists of QuestionOption models.
+    """
+    if not options:
+        return options, correct_option_id
+
+    is_model = hasattr(options[0], "id")
+    correct_text = None
+    distractor_texts = []
+
+    for opt in options:
+        opt_id = opt.id if is_model else opt["id"]
+        opt_text = opt.text if is_model else opt["text"]
+        if opt_id.strip().upper() == correct_option_id.strip().upper():
+            correct_text = opt_text
+        else:
+            distractor_texts.append(opt_text)
+
+    if not correct_text:
+        return options, correct_option_id
+
+    letters = [opt.id if is_model else opt["id"] for opt in options]
+    if target_slot not in letters:
+        return options, correct_option_id
+
+    target_idx = letters.index(target_slot)
+    new_options = []
+    d_idx = 0
+    for idx, letter in enumerate(letters):
+        if idx == target_idx:
+            chosen_text = correct_text
+        else:
+            chosen_text = distractor_texts[d_idx]
+            d_idx += 1
+
+        if is_model:
+            new_options.append(QuestionOption(id=letter, text=chosen_text))
+        else:
+            new_options.append({"id": letter, "text": chosen_text})
+
+    return new_options, target_slot
+
+
 async def seed_canonical_question_bank() -> int:
     """
-    Seeds the MongoDB questions collection with canonical, approved questions if empty.
-    Returns the count of seeded questions.
+    Seeds and balances the canonical question bank.
+    Ensures that options are evenly distributed across 'A', 'B', 'C', and 'D' (~25% each).
     """
+    from collections import Counter
+    from app.models.consolidated import QuizAttempt
+
+    # 1. Check if DB questions exist and check distribution balance
+    all_questions = await Question.find_all().to_list()
+    if all_questions:
+        counts = Counter(q.correct_option_id for q in all_questions)
+        # If any single option dominates (> 35% of total), rebalance DB questions
+        if any(cnt / len(all_questions) > 0.35 for cnt in counts.values()):
+            logger.info("Rebalancing question bank options in database to ensure 25%% chance for A, B, C, D...")
+            by_topic: dict[tuple[str, str], list[Question]] = {}
+            for q in all_questions:
+                by_topic.setdefault((q.subject_slug, q.topic_slug), []).append(q)
+
+            all_attempts = await QuizAttempt.find_all().to_list()
+            for (subj, top), q_list in by_topic.items():
+                for idx, q in enumerate(q_list):
+                    target_slot = ["A", "B", "C", "D"][idx % 4]
+                    if q.correct_option_id != target_slot:
+                        old_options = {opt.id: opt.text for opt in q.options}
+                        new_opts, new_correct = rebalance_options_to_target(q.options, q.correct_option_id, target_slot)
+                        new_opts_by_text = {opt.text: opt.id for opt in new_opts}
+
+                        for att in all_attempts:
+                            att_modified = False
+                            for item in att.items:
+                                if item.question_id == q.id and item.selected_option_id:
+                                    old_selected_text = old_options.get(item.selected_option_id)
+                                    if old_selected_text and old_selected_text in new_opts_by_text:
+                                        item.selected_option_id = new_opts_by_text[old_selected_text]
+                                        att_modified = True
+                            if att_modified:
+                                await att.save()
+
+                        q.options = new_opts
+                        q.correct_option_id = new_correct
+                        await q.save()
+            logger.info("Question bank option rebalancing complete.")
+
     existing_count = await Question.count()
     if existing_count >= len(SEED_QUESTIONS):
         logger.info("Question bank already populated (%d questions exist).", existing_count)
