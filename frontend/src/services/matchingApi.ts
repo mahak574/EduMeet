@@ -39,17 +39,17 @@ export interface MatchResponse {
 }
 
 export interface QueuePeerInfo {
-  user_id: string;
   display_name: string;
-  country: string;
   teaches_subjects: string[];
   learns_subjects: string[];
-  teach_topics: string[];
-  learn_topics: string[];
-  waiting_minutes: number;
-  compatibility_label: string;
   is_compatible: boolean;
   is_me: boolean;
+  user_id?: string;
+  country?: string;
+  teach_topics?: string[];
+  learn_topics?: string[];
+  waiting_minutes?: number;
+  compatibility_label?: string;
 }
 
 export interface PoolRosterResponse {

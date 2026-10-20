@@ -2,18 +2,47 @@ import { APIResponse } from '../types';
 
 const API_BASE = '/api/v1';
 
-let accessToken: string | null = localStorage.getItem('edumeet_access_token');
+let accessToken: string | null = null;
+let refreshPromise: Promise<string | null> | null = null;
 
 export const setAccessToken = (token: string | null) => {
   accessToken = token;
-  if (token) {
-    localStorage.setItem('edumeet_access_token', token);
-  } else {
-    localStorage.removeItem('edumeet_access_token');
-  }
 };
 
 export const getAccessToken = () => accessToken;
+
+async function executeTokenRefresh(): Promise<string | null> {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  refreshPromise = (async () => {
+    try {
+      const refreshResp = await fetch(`${API_BASE}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+
+      if (refreshResp.ok) {
+        const refreshData: APIResponse<{ access_token: string }> = await refreshResp.json();
+        const newToken = refreshData.data?.access_token || null;
+        setAccessToken(newToken);
+        return newToken;
+      } else {
+        setAccessToken(null);
+        return null;
+      }
+    } catch {
+      setAccessToken(null);
+      return null;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
+}
 
 export async function apiClient<T>(
   endpoint: string,
@@ -34,33 +63,16 @@ export async function apiClient<T>(
 
   let response = await fetch(`${API_BASE}${endpoint}`, config);
 
-  // If unauthorized (401), attempt token refresh using httpOnly cookie
+  // If unauthorized (401), attempt token refresh using single shared in-flight promise
   if (response.status === 401 && !endpoint.includes('/auth/')) {
-    try {
-      const refreshResp = await fetch(`${API_BASE}/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+    const newToken = await executeTokenRefresh();
+    if (newToken) {
+      headers.set('Authorization', `Bearer ${newToken}`);
+      response = await fetch(`${API_BASE}${endpoint}`, {
+        ...options,
+        headers,
         credentials: 'include',
       });
-
-      if (refreshResp.ok) {
-        const refreshData: APIResponse<{ access_token: string }> = await refreshResp.json();
-        if (refreshData.data?.access_token) {
-          setAccessToken(refreshData.data.access_token);
-          headers.set('Authorization', `Bearer ${refreshData.data.access_token}`);
-          // Retry initial request
-          response = await fetch(`${API_BASE}${endpoint}`, {
-            ...options,
-            headers,
-            credentials: 'include',
-          });
-        }
-      } else {
-        // Refresh failed, clear access token
-        setAccessToken(null);
-      }
-    } catch {
-      setAccessToken(null);
     }
   }
 

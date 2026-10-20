@@ -60,15 +60,9 @@ class MatchingCycleRunResponse(BaseModel):
 
 
 class QueuePeerInfo(BaseModel):
-    user_id: str
     display_name: str
-    country: str
     teaches_subjects: List[str]
     learns_subjects: List[str]
-    teach_topics: List[str] = Field(default_factory=list)
-    learn_topics: List[str] = Field(default_factory=list)
-    waiting_minutes: int = 1
-    compatibility_label: str
     is_compatible: bool = False
     is_me: bool = False
 

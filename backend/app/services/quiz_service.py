@@ -209,10 +209,11 @@ class QuizService:
         items: List[QuestionItemAttempt] = []
 
         # Create item attempts; mark repeat questions if applicable
-        for q, is_repeat in selected_questions:
+        for idx, (q, is_repeat) in enumerate(selected_questions):
             item = QuestionItemAttempt(
                 question_id=q[0].id if isinstance(q, tuple) else q.id,
                 time_limit_seconds=QUESTION_TIME_LIMIT_SECONDS,
+                served_at=now if idx == 0 else None,
             )
             items.append(item)
 
@@ -272,8 +273,9 @@ class QuizService:
         # Update served timestamp on current item attempt if not already set
         if attempt.current_question_index < len(attempt.items):
             item = attempt.items[attempt.current_question_index]
-            item.served_at = datetime.now(timezone.utc)
-            await attempt.save()
+            if not item.served_at:
+                item.served_at = datetime.now(timezone.utc)
+                await attempt.save()
 
         return {
             "attempt_id": str(attempt.id),
@@ -296,11 +298,12 @@ class QuizService:
         attempt_id: PydanticObjectId,
         user_id: PydanticObjectId,
         selected_option_id: Optional[str],
-        elapsed_seconds: float,
+        elapsed_seconds: float = 0.0,
     ) -> Dict[str, any]:
         """
         Submits answer for the current question, enforces the 60s timer (with 5s buffer),
         scores correctness, and advances to the next question.
+        Computes elapsed from server-side served_at, ignoring client elapsed_seconds.
         """
         attempt = await QuizAttempt.get(attempt_id)
         if not attempt or attempt.user_id != user_id:
@@ -327,8 +330,19 @@ class QuizService:
         if not question:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found.")
 
+        # Determine elapsed time strictly from server-side served_at; ignore client elapsed_seconds
+        server_elapsed = 0.0
+        if idx < len(attempt.items):
+            item = attempt.items[idx]
+            if item.served_at:
+                served_utc = _ensure_utc(item.served_at)
+                server_elapsed = max(0.0, (now - served_utc).total_seconds())
+            else:
+                item.served_at = now
+                server_elapsed = 0.0
+
         # Determine if timed out
-        is_timed_out = elapsed_seconds > (QUESTION_TIME_LIMIT_SECONDS + NETWORK_BUFFER_SECONDS)
+        is_timed_out = server_elapsed > (QUESTION_TIME_LIMIT_SECONDS + NETWORK_BUFFER_SECONDS)
         is_correct = False
         if not is_timed_out and selected_option_id:
             is_correct = selected_option_id.strip().upper() == question.correct_option_id.strip().upper()
@@ -340,8 +354,11 @@ class QuizService:
             item.selected_option_id = selected_option_id
             item.is_correct = is_correct
             item.timed_out = is_timed_out
+            item.elapsed_seconds = server_elapsed
 
         attempt.current_question_index += 1
+        if attempt.current_question_index < len(attempt.items):
+            attempt.items[attempt.current_question_index].served_at = now
 
         if attempt.current_question_index >= len(attempt.assigned_question_ids):
             # All questions finished
@@ -415,6 +432,8 @@ class QuizService:
                 attempt.is_completed = True
                 attempt.completed_at = now
                 await QuizService._finalize_attempt(attempt)
+            elif attempt.current_question_index < len(attempt.items):
+                attempt.items[attempt.current_question_index].served_at = now
 
             await attempt.save()
             return {

@@ -16,13 +16,15 @@ from app.services.peer_quiz_service import PeerQuizService
 router = APIRouter(prefix="/peer-quizzes", tags=["Peer Quizzes"])
 
 
-def _format_quiz(quiz: PeerQuiz) -> PeerQuizResponse:
+def _format_quiz(quiz: PeerQuiz, viewer_id: PydanticObjectId) -> PeerQuizResponse:
+    # Never return correct_option_index to the learner
+    is_learner = str(quiz.target_learner_id) == str(viewer_id)
     q_responses = [
         PeerQuestionResponse(
             question_type=q.question_type,
             prompt=q.prompt,
             options=q.options,
-            correct_option_index=q.correct_option_index,
+            correct_option_index=None if is_learner else q.correct_option_index,
             partner_answer=q.partner_answer,
             is_auto_graded_correct=q.is_auto_graded_correct,
             partner_clarity_rating=q.partner_clarity_rating,
@@ -58,7 +60,7 @@ async def create_peer_quiz(
         creator_id=current_user.id,
         questions=questions_dicts,
     )
-    return APIResponse(success=True, data=_format_quiz(quiz))
+    return APIResponse(success=True, data=_format_quiz(quiz, current_user.id))
 
 
 @router.get("/{session_id}/assigned", response_model=APIResponse[Optional[PeerQuizResponse]])
@@ -69,7 +71,7 @@ async def get_assigned_peer_quiz(
     quiz = await PeerQuizService.get_quiz_for_learner(session_id, current_user.id)
     if not quiz:
         return APIResponse(success=True, data=None)
-    return APIResponse(success=True, data=_format_quiz(quiz))
+    return APIResponse(success=True, data=_format_quiz(quiz, current_user.id))
 
 
 @router.get("/{session_id}/drafted", response_model=APIResponse[Optional[PeerQuizResponse]])
@@ -80,7 +82,7 @@ async def get_drafted_peer_quiz(
     quiz = await PeerQuizService.get_quiz_created_by(session_id, current_user.id)
     if not quiz:
         return APIResponse(success=True, data=None)
-    return APIResponse(success=True, data=_format_quiz(quiz))
+    return APIResponse(success=True, data=_format_quiz(quiz, current_user.id))
 
 
 @router.post("/{session_id}/submit", response_model=APIResponse[PeerQuizResponse])
@@ -95,4 +97,4 @@ async def submit_peer_quiz_answers(
         learner_id=current_user.id,
         answers=answers_dicts,
     )
-    return APIResponse(success=True, data=_format_quiz(evaluated_quiz))
+    return APIResponse(success=True, data=_format_quiz(evaluated_quiz, current_user.id))

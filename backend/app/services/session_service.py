@@ -83,7 +83,12 @@ class SessionService:
     async def create_demo_session(cls, user_id: PydanticObjectId, subject: Optional[str] = None) -> Session:
         # Determine subjects dynamically based on current user's profile
         current_user = await User.get(user_id)
-        studied = current_user.subjects_studied if current_user and current_user.subjects_studied else []
+        if not current_user or not current_user.age_confirmed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Age confirmation is required before creating a session.",
+            )
+        studied = current_user.subjects_studied if current_user.subjects_studied else []
         teach_sub = subject or (studied[0] if studied else "maths")
         learn_sub = studied[1] if len(studied) > 1 else ("python" if teach_sub != "python" else "physics")
 

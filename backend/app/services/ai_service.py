@@ -14,6 +14,12 @@ from app.schemas.ai import (
     SessionPlanResponse,
     TopicPlan,
 )
+from app.services.llm_provider import (
+    LLMExplanationOutput,
+    LLMPlanOutput,
+    LLMProvider,
+    get_default_llm_provider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +245,12 @@ CURATED_PEDAGOGICAL_GUIDES: Dict[str, Dict[str, Any]] = {
 
 
 class AIService:
+    _llm_provider: Optional[LLMProvider] = None
+
+    @classmethod
+    def set_llm_provider(cls, provider: Optional[LLMProvider]):
+        cls._llm_provider = provider
+
     @classmethod
     def _build_default_plan(
         cls,
@@ -336,47 +348,52 @@ class AIService:
             "Both peers share equal voice time to maximize retention via the Protégé Effect.",
         ]
 
-        # If either opted out or OpenAI key is not configured, return deterministic fallback
-        if not ai_consent_mutual or not settings.OPENAI_API_KEY:
+        # If either opted out, return deterministic fallback
+        if not ai_consent_mutual:
             notice = (
                 "Operating with deterministic pedagogical blueprint. "
-                "Mutual AI consent and active LLM configuration are required for generative AI customization."
+                "Mutual AI consent is required for generative AI customization."
             )
             return SessionPlanResponse(
                 session_id=session.id,
                 is_llm_generated=False,
-                ai_consent_mutual=ai_consent_mutual,
+                ai_consent_mutual=False,
                 plan_teacher_a=plan_a,
                 plan_teacher_b=plan_b,
                 general_guidelines=guidelines,
                 notice=notice,
             )
 
-        # If mutual consent is granted and key is set, attempt LLM enhancement
+        # Attempt LLM enhancement via LLMProvider
+        llm = cls._llm_provider or get_default_llm_provider()
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                prompt = (
-                    f"Create an optimal 20-minute peer lesson guide for reciprocal study pair.\n"
-                    f"Teacher 1: {user_a.full_name} teaching {session.topic_a.subtopic_slug} ({session.topic_a.subject_slug}) to {user_b.full_name}.\n"
-                    f"Teacher 2: {user_b.full_name} teaching {session.topic_b.subtopic_slug} ({session.topic_b.subject_slug}) to {user_a.full_name}.\n"
-                    f"Return JSON with custom learning objectives and discussion prompts tailored to their roles."
-                )
-                resp = await client.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": settings.OPENAI_MODEL,
-                        "messages": [
-                            {"role": "system", "content": "You are an expert pedagogical engineering coach."},
-                            {"role": "user", "content": prompt},
-                        ],
-                        "temperature": 0.4,
-                    },
-                )
-                if resp.status_code == 200:
+            # Anonymized prompt: never send real names to the LLM (fixed session.topic_a bug)
+            prompt = (
+                f"Create an optimal 20-minute peer lesson guide for reciprocal study pair.\n"
+                f"Teacher 1: Student A teaching {user_a_p.teach_topic_slug} ({user_a_p.teach_subject_slug}) to Student B.\n"
+                f"Teacher 2: Student B teaching {user_b_p.teach_topic_slug} ({user_b_p.teach_subject_slug}) to Student A.\n"
+                f"Return JSON format with keys: objectives (array of strings), discussion_prompts (array of strings), checklist (array of strings)."
+            )
+            completion = await llm.generate_completion(
+                system_prompt="You are an expert pedagogical engineering coach.",
+                user_prompt=prompt,
+            )
+            if completion:
+                raw_json = json.loads(completion)
+                # Validate output with Pydantic
+                validated_output = LLMPlanOutput.model_validate(raw_json)
+                if validated_output.objectives or validated_output.discussion_prompts:
+                    # Apply validated LLM output to customize plan
+                    if len(plan_a.phases) > 0 and validated_output.objectives:
+                        plan_a.phases[0].objectives = validated_output.objectives[:2]
+                    if len(plan_a.phases) > 1 and validated_output.discussion_prompts:
+                        plan_a.phases[1].discussion_prompts = validated_output.discussion_prompts[:2]
+                    if len(plan_b.phases) > 0 and validated_output.objectives:
+                        plan_b.phases[0].objectives = validated_output.objectives[:2]
+                    if len(plan_b.phases) > 1 and validated_output.discussion_prompts:
+                        plan_b.phases[1].discussion_prompts = validated_output.discussion_prompts[:2]
+
+                    # ONLY set is_llm_generated=True when LLM output is actually used
                     return SessionPlanResponse(
                         session_id=session.id,
                         is_llm_generated=True,
@@ -406,7 +423,7 @@ class AIService:
         user: User,
     ) -> CoachExplainResponse:
         # Check user consent
-        if not user.ai_consent or not settings.OPENAI_API_KEY:
+        if not user.ai_consent:
             # Deterministic pedagogical breakdown
             topic_key = request.topic_slug
             guide = CURATED_PEDAGOGICAL_GUIDES.get(topic_key)
@@ -437,41 +454,32 @@ class AIService:
                 practice_question=practice,
             )
 
-        # Generative AI Coach
+        # Generative AI Coach via LLMProvider
+        llm = cls._llm_provider or get_default_llm_provider()
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                prompt = (
-                    f"Explain the concept '{request.concept_or_question}' in {request.subject_slug} ({request.topic_slug}).\n"
-                    f"Student confusion note: '{request.student_confusion or 'None provided'}'.\n"
-                    f"Provide a clear analogy, step-by-step breakdown, 3 key takeaways, and 1 quick check question. "
-                    f"Return JSON format with keys: analogy, explanation, key_takeaways (array of strings), practice_question."
-                )
-                resp = await client.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": settings.OPENAI_MODEL,
-                        "messages": [
-                            {"role": "system", "content": "You are a friendly Socratic computer science mentor."},
-                            {"role": "user", "content": prompt},
-                        ],
-                        "response_format": {"type": "json_object"},
-                        "temperature": 0.4,
-                    },
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    content = json.loads(data["choices"][0]["message"]["content"])
+            # Anonymized prompt: never send real user names to the LLM
+            prompt = (
+                f"Explain the concept '{request.concept_or_question}' in {request.subject_slug} ({request.topic_slug}).\n"
+                f"Student confusion note: '{request.student_confusion or 'None provided'}'.\n"
+                f"Provide a clear analogy, step-by-step breakdown, 3 key takeaways, and 1 quick check question. "
+                f"Return JSON format with keys: title, analogy, explanation, key_takeaway."
+            )
+            completion = await llm.generate_completion(
+                system_prompt="You are a friendly Socratic computer science mentor.",
+                user_prompt=prompt,
+            )
+            if completion:
+                raw_json = json.loads(completion)
+                # Validate output with Pydantic
+                validated = LLMExplanationOutput.model_validate(raw_json)
+                if validated.analogy and validated.explanation:
                     return CoachExplainResponse(
                         concept=request.concept_or_question,
                         is_llm_generated=True,
-                        analogy=content.get("analogy", ""),
-                        explanation=content.get("explanation", ""),
-                        key_takeaways=content.get("key_takeaways", []),
-                        practice_question=content.get("practice_question", ""),
+                        analogy=validated.analogy,
+                        explanation=validated.explanation,
+                        key_takeaways=[validated.key_takeaway],
+                        practice_question=f"How would you apply {request.concept_or_question} in a real-world system?",
                     )
         except Exception as exc:
             logger.warning("Generative coach call failed, falling back: %s", exc)

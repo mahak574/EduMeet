@@ -27,8 +27,9 @@ export const useAuthStore = create<AuthState>((set) => ({
   initAuth: async () => {
     set({ isLoading: true, error: null });
     try {
-      const user = await apiClient<User>('/users/me');
-      set({ user, isAuthenticated: true, isLoading: false });
+      const res = await apiClient<AuthTokenResponse>('/auth/refresh', { method: 'POST' });
+      setAccessToken(res.access_token);
+      set({ user: res.user, isAuthenticated: true, isLoading: false });
     } catch {
       setAccessToken(null);
       set({ user: null, isAuthenticated: false, isLoading: false });

@@ -32,7 +32,7 @@ class AuthService:
         email_reqs = await redis.incr(email_key)
         if email_reqs == 1:
             await redis.expire(email_key, 3600)  # 1 hour window
-        if email_reqs > 5:
+        if email_reqs > 3:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Too many OTP requests for this email. Please wait an hour.",
@@ -41,7 +41,7 @@ class AuthService:
         ip_reqs = await redis.incr(ip_key)
         if ip_reqs == 1:
             await redis.expire(ip_key, 600)  # 10 minute window
-        if ip_reqs > 10:
+        if ip_reqs > 5:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Too many requests from this IP address. Please wait a few minutes.",
@@ -78,52 +78,60 @@ class AuthService:
     async def verify_otp(email: str, code: str) -> Tuple[User, str, str]:
         """
         Verifies OTP and returns (user, access_token, refresh_token).
-        Creates user if doesn't exist yet (signup flow requires age confirmation afterwards).
+        Atomically increments attempts with find_one_and_update (attempts < max_attempts) before comparing.
         """
         normalized_email = email.lower().strip()
         now = datetime.now(timezone.utc)
 
-        # Find latest active challenge
-        challenge = await OTPChallenge.find(
-            OTPChallenge.email == normalized_email,
-            OTPChallenge.is_used == False,
-            OTPChallenge.expires_at > now,
-        ).sort(-OTPChallenge.created_at).first_or_none()
+        coll = OTPChallenge.get_motor_collection()
+        challenge_doc = await coll.find_one_and_update(
+            {
+                "email": normalized_email,
+                "is_used": False,
+                "expires_at": {"$gt": now},
+                "attempts": {"$lt": 5},
+            },
+            {"$inc": {"attempts": 1}},
+            sort=[("created_at", -1)],
+            return_document=True,
+        )
 
-        if not challenge:
+        if not challenge_doc:
+            exhausted = await coll.find_one(
+                {"email": normalized_email, "is_used": False},
+                sort=[("created_at", -1)],
+            )
+            if exhausted and exhausted.get("attempts", 0) >= exhausted.get("max_attempts", 5):
+                await coll.update_one({"_id": exhausted["_id"]}, {"$set": {"is_used": True}})
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Maximum verification attempts exceeded. Please request a new code.",
+                )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid or expired verification code. Please request a new one.",
             )
 
-        # Check attempts
-        if challenge.attempts >= challenge.max_attempts:
-            challenge.is_used = True
-            await challenge.save()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Maximum verification attempts exceeded. Please request a new code.",
-            )
-
-        is_valid = verify_otp_hmac(normalized_email, code, challenge.hashed_otp)
+        is_valid = verify_otp_hmac(normalized_email, code, challenge_doc["hashed_otp"])
         if not is_valid:
-            challenge.attempts += 1
-            if challenge.attempts >= challenge.max_attempts:
-                challenge.is_used = True
-            await challenge.save()
+            if challenge_doc["attempts"] >= challenge_doc.get("max_attempts", 5):
+                await coll.update_one({"_id": challenge_doc["_id"]}, {"$set": {"is_used": True}})
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Maximum verification attempts exceeded. Please request a new code.",
+                )
+            remaining = challenge_doc.get("max_attempts", 5) - challenge_doc["attempts"]
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Incorrect verification code.",
+                detail=f"Incorrect verification code. {remaining} attempt(s) remaining.",
             )
 
         # Mark challenge as used
-        challenge.is_used = True
-        await challenge.save()
+        await coll.update_one({"_id": challenge_doc["_id"]}, {"$set": {"is_used": True}})
 
         # Fetch or create user record
         user = await User.find_one(User.email == normalized_email)
         if not user:
-            # Create user placeholder; age confirmation & profile completion done next
             user = User(
                 email=normalized_email,
                 full_name="",
@@ -133,7 +141,6 @@ class AuthService:
                 role="student",
             )
             await user.insert()
-            # Also create corresponding skill profile
             skill_profile = SkillProfile(user_id=user.id)
             await skill_profile.insert()
 
@@ -157,20 +164,38 @@ class AuthService:
     @staticmethod
     async def rotate_refresh_token(raw_refresh: str) -> Tuple[User, str, str]:
         """
-        Rotates refresh token with reuse detection.
-        If an old already-rotated token is re-presented, revoke all sessions (family revocation).
+        Rotates refresh token using atomic GETDEL, with a 15-second grace window that returns
+        the already-issued successor. Only treats reuse after the grace window as theft.
         """
         redis = get_redis()
         token_hash = hash_refresh_token(raw_refresh)
         key = f"refresh:{token_hash}"
 
-        user_id = await redis.get(key)
+        # Atomic GETDEL
+        try:
+            user_id = await redis.getdel(key)
+        except Exception:
+            user_id = await redis.get(key)
+            if user_id:
+                await redis.delete(key)
+
         if not user_id:
-            # Check if this token was previously revoked / used (reuse alert)
+            # Check 15-second grace window for concurrent requests
+            grace_payload_str = await redis.get(f"refresh_grace:{token_hash}")
+            if grace_payload_str:
+                grace_data = json.loads(grace_payload_str)
+                user = await User.get(grace_data["user_id"])
+                if not user or not user.is_active:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="User not found or account deactivated.",
+                    )
+                return user, grace_data["access_token"], grace_data["raw_refresh"]
+
+            # If not in grace window, check if previously used (theft detection)
             was_used = await redis.get(f"revoked_refresh:{token_hash}")
             if was_used:
-                # Potential token theft! Revoke all tokens for that user
-                logger.warning("Token reuse detected for user %s! Revoking all sessions.", was_used)
+                logger.warning("Token reuse detected after grace window for user %s! Revoking all sessions.", was_used)
                 await AuthService.revoke_all_user_sessions(was_used)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -184,11 +209,7 @@ class AuthService:
                 detail="User not found or account deactivated.",
             )
 
-        # 1. Delete current refresh token & mark as used
-        await redis.delete(key)
-        await redis.setex(f"revoked_refresh:{token_hash}", 86400, user_id)  # Remember for 24h for reuse detection
-
-        # 2. Issue new pair
+        # Issue new token pair
         new_access_token = create_access_token(
             user_id=str(user.id),
             role=user.role,
@@ -196,6 +217,16 @@ class AuthService:
         )
         new_raw_refresh, new_refresh_hash = generate_refresh_token()
         await AuthService._store_refresh_token(str(user.id), new_refresh_hash)
+
+        # Store successor in 15-second grace window
+        grace_record = {
+            "user_id": str(user.id),
+            "access_token": new_access_token,
+            "raw_refresh": new_raw_refresh,
+        }
+        await redis.setex(f"refresh_grace:{token_hash}", 15, json.dumps(grace_record))
+        # 24h revoked marker for reuse detection after grace window
+        await redis.setex(f"revoked_refresh:{token_hash}", 86400, str(user.id))
 
         return user, new_access_token, new_raw_refresh
 

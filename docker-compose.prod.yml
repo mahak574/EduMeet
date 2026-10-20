@@ -1,0 +1,76 @@
+services:
+  mongo:
+    image: mongo:7.0
+    container_name: edumeet-mongo-prod
+    restart: unless-stopped
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD}
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - edumeet-network
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: edumeet-redis-prod
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - edumeet-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../docker/backend.Dockerfile
+    container_name: edumeet-backend-prod
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - MONGODB_URL=mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongo:27017/edumeet?authSource=admin
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+    depends_on:
+      - mongo
+      - redis
+    networks:
+      - edumeet-network
+
+  y-websocket:
+    build:
+      context: ./sidecars/y-websocket
+      dockerfile: ../../docker/y-websocket.Dockerfile
+    container_name: edumeet-y-websocket-prod
+    restart: unless-stopped
+    environment:
+      - PORT=1234
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+    depends_on:
+      - redis
+    networks:
+      - edumeet-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/frontend.Dockerfile
+    container_name: edumeet-frontend-prod
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+      - y-websocket
+    networks:
+      - edumeet-network
+
+networks:
+  edumeet-network:
+    driver: bridge
+
+volumes:
+  mongo_data:
+  redis_data:

@@ -2,6 +2,7 @@ import logging
 import httpx
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from app.config import settings
+from app.core.rate_limit import limiter
 from app.core.security import decode_access_token
 from app.core.turnstile import verify_turnstile_token
 from app.models.consolidated import User
@@ -49,6 +50,7 @@ def _set_refresh_cookie(response: Response, raw_refresh: str) -> None:
 
 
 @router.post("/otp/send", response_model=APIResponse[dict])
+@limiter.limit("5/10minutes")
 async def send_otp(request: Request, payload: SendOTPRequest):
     client_ip = request.client.host if request.client else "127.0.0.1"
 
@@ -68,7 +70,8 @@ async def send_otp(request: Request, payload: SendOTPRequest):
 
 
 @router.post("/otp/verify", response_model=APIResponse[AuthTokenResponse])
-async def verify_otp(response: Response, payload: VerifyOTPRequest):
+@limiter.limit("10/10minutes")
+async def verify_otp(request: Request, response: Response, payload: VerifyOTPRequest):
     user, access_token, raw_refresh = await AuthService.verify_otp(
         email=payload.email,
         code=payload.code,
@@ -88,7 +91,9 @@ async def verify_otp(response: Response, payload: VerifyOTPRequest):
 
 
 @router.post("/refresh", response_model=APIResponse[AuthTokenResponse])
+@limiter.limit("30/minute")
 async def refresh_token(
+    request: Request,
     response: Response,
     edumeet_refresh: str = Cookie(None),
 ):
@@ -146,7 +151,7 @@ async def get_auth_config():
     return APIResponse(
         success=True,
         data={
-            "google_client_id": settings.GOOGLE_CLIENT_ID or "915728215365-0sfpmtc038889gau3tafrvrf6gfrcrgu.apps.googleusercontent.com",
+            "google_client_id": settings.GOOGLE_CLIENT_ID,
             "turnstile_site_key": settings.TURNSTILE_SITE_KEY,
         },
     )
@@ -154,61 +159,61 @@ async def get_auth_config():
 
 async def verify_google_id_token(id_token: str) -> dict:
     """
-    Verifies a Google OAuth2 ID token using Google's official tokeninfo endpoint.
-    Extracts authentic email, user's real name, and profile details.
+    Verifies a Google OAuth2 ID token using google-auth verify_oauth2_token with required audience.
+    Requires verified email and rejects mock tokens in non-development environments with 404.
     """
-    # Allow mock token strictly in local development tests
-    if (id_token.startswith("mock_") or id_token == "mock_google_id_token_demo") and settings.APP_ENV == "development":
+    # Gate mock tokens strictly to APP_ENV == "development"; return 404 otherwise
+    if id_token.startswith("mock_") or id_token == "mock_google_id_token_demo":
+        if settings.APP_ENV != "development":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Not Found",
+            )
         return {
             "email": "demo_student@example.com",
             "name": "Alex Rivera",
             "picture": None,
         }
 
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://oauth2.googleapis.com/tokeninfo",
-                params={"id_token": id_token},
-            )
-    except Exception as exc:
-        logger.error(f"Failed to communicate with Google tokeninfo: {exc}")
+    if not settings.GOOGLE_CLIENT_ID:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to contact Google authentication services. Please check your connection.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Google authentication is not configured.",
         )
 
-    if resp.status_code != 200:
-        logger.warning(f"Google tokeninfo rejected token ({resp.status_code}): {resp.text}")
+    from google.oauth2 import id_token as google_id_token
+    from google.auth.transport import requests as google_requests
+
+    try:
+        id_info = google_id_token.verify_oauth2_token(
+            id_token,
+            google_requests.Request(),
+            audience=settings.GOOGLE_CLIENT_ID,
+        )
+    except Exception as exc:
+        logger.warning(f"Google ID token verification failed: {exc}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired Google authentication token. Please sign in again.",
         )
 
-    data = resp.json()
-    email = data.get("email")
+    if not id_info.get("email_verified"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Your Google account email address must be verified.",
+        )
+
+    email = id_info.get("email")
     if not email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Your Google account did not supply an email address.",
         )
 
-    expected_client_id = settings.GOOGLE_CLIENT_ID
-    if expected_client_id:
-        token_aud = data.get("aud")
-        token_azp = data.get("azp")
-        if token_aud != expected_client_id and token_azp != expected_client_id:
-            logger.warning(f"Google token aud mismatch: aud={token_aud}, azp={token_azp}, expected={expected_client_id}")
-            if not token_aud or not expected_client_id.startswith(token_aud.split("-")[0]):
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Google ID token was issued for an unrecognized application.",
-                )
-
     return {
         "email": email.strip().lower(),
-        "name": data.get("name") or email.split("@")[0],
-        "picture": data.get("picture"),
+        "name": id_info.get("name") or email.split("@")[0],
+        "picture": id_info.get("picture"),
     }
 
 
@@ -217,7 +222,7 @@ async def google_auth(response: Response, payload: GoogleAuthRequest):
     """
     Authenticates a user using their genuine Google ID token.
     Extracts the user's authentic Google email and full name, provisions an account if first-time,
-    and returns session access tokens.
+    and returns session access tokens. Never sets age_confirmed=True automatically.
     """
     profile = await verify_google_id_token(payload.id_token)
     email = profile["email"]
@@ -228,7 +233,7 @@ async def google_auth(response: Response, payload: GoogleAuthRequest):
         user = User(
             email=email,
             full_name=full_name,
-            age_confirmed=True,
+            age_confirmed=False,
             country="US",
             timezone="UTC",
             role="student",
@@ -260,8 +265,14 @@ async def google_auth(response: Response, payload: GoogleAuthRequest):
 @router.post("/demo-login", response_model=APIResponse[AuthTokenResponse])
 async def demo_login(response: Response):
     """
-    1-click instant login for testing and interactive assessment without waiting for OTP.
+    1-click instant login for testing in development only. Returns 404 in non-development.
     """
+    if settings.APP_ENV != "development":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not Found",
+        )
+
     email = "demo_student@example.com"
     user = await User.find_one(User.email == email)
     if not user:

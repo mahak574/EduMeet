@@ -61,6 +61,12 @@ class PeerQuizService:
             )
             await quiz.insert()
         else:
+            # Block edits if quiz has already been graded or if the learner has already submitted any answer
+            if quiz.graded_at is not None or any(q.partner_answer is not None for q in quiz.questions):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot edit peer quiz after the learner has answered or after grading.",
+                )
             quiz.questions = peer_questions
             quiz.submitted_at = now
             await quiz.save()
@@ -101,6 +107,12 @@ class PeerQuizService:
         quiz = await cls.get_quiz_for_learner(session_id, learner_id)
         if not quiz:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No peer quiz found for you in this session.")
+
+        if quiz.graded_at is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Quiz has already been submitted and graded. Re-submission is not allowed.",
+            )
 
         total = len(quiz.questions)
         correct_count = 0

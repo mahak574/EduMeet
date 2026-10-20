@@ -78,7 +78,7 @@ async def init_db() -> None:
         await redis_client.ping()
         logger.info("Redis connected successfully.")
     except Exception as exc:
-        if settings.APP_ENV in {"development", "test"}:
+        if settings.APP_ENV == "development":
             logger.warning(
                 "Redis connection to %s failed (%s). Falling back to in-memory FakeRedis for local development. "
                 "To use real Redis, run 'docker compose up redis -d' in another terminal.",

@@ -16,9 +16,11 @@ for venv_candidate in [
         sys.path.insert(0, str(venv_candidate))
 
 # 2. Defend against broken host pyOpenSSL/service_identity (e.g. Anaconda version mismatches)
+import importlib
+
 try:
-    import OpenSSL
-    _ = OpenSSL.crypto.X509Extension
+    openssl_mod = importlib.import_module("OpenSSL")
+    _ = getattr(getattr(openssl_mod, "crypto", None), "X509Extension", None)
 except Exception:
     sys.modules["service_identity"] = None
     sys.modules["OpenSSL"] = None
@@ -31,6 +33,7 @@ os.environ["SECRET_KEY"] = "test_secret_key_minimum_32_characters_long_12345"
 os.environ["OTP_HMAC_SECRET"] = "test_otp_hmac_secret_minimum_32_characters_long"
 os.environ["MONGODB_URL"] = "mongodb://localhost:27017/edumeet_test"
 os.environ["REDIS_URL"] = "redis://localhost:6379/0"
+os.environ["GOOGLE_CLIENT_ID"] = "test_google_client_id_for_tests.apps.googleusercontent.com"
 
 import pytest
 import pytest_asyncio

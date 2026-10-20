@@ -2,7 +2,7 @@ from typing import Optional
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.dependencies import get_current_user, get_current_user_optional
+from app.core.dependencies import get_current_user
 from app.models.consolidated import Match, User
 from app.schemas.matching import (
     MatchConfirmRequest,
@@ -25,6 +25,11 @@ async def join_matching_pool(
     req: PoolJoinRequest,
     current_user: User = Depends(get_current_user),
 ):
+    if not current_user.age_confirmed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Age confirmation is required before joining the matching pool.",
+        )
     entry = await MatchingService.join_pool(current_user.id, req.subject_slugs)
     return APIResponse(
         success=True,
@@ -69,7 +74,7 @@ async def get_matching_pool_status(
 
 @router.get("/pool/live-roster", response_model=APIResponse[PoolRosterResponse])
 async def get_matching_pool_live_roster(
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Returns real-time queue visibility for students:

@@ -2,10 +2,9 @@ import asyncio
 import json
 import logging
 import os
-import sys
-import tempfile
+import secrets
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from beanie import PydanticObjectId
 from fastapi import (
@@ -19,12 +18,13 @@ from fastapi import (
 )
 from pydantic import BaseModel
 from app.config import settings
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_current_user_optional
 from app.core.websocket_ticket import (
     WS_CLOSE_UNAUTHORIZED,
     consume_ws_ticket,
     issue_ws_ticket,
 )
+from app.services.video_service import VideoProvider
 from app.models.consolidated import Message, Session, User
 from app.schemas.common import APIResponse
 from app.services.session_service import SessionService
@@ -34,121 +34,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
 
-
-class ExecuteCodeRequest(BaseModel):
-    code: str
-    language: str = "python"
-
-
-class PrecheckSubmitRequest(BaseModel):
-    answers: Dict[str, str]  # question_id -> selected_option_id
-
-
-class AdvancePhaseRequest(BaseModel):
-    target_phase: Optional[str] = None
-
-
-class SendMessageRequest(BaseModel):
-    content: str
-
-
-@router.post("/execute-code", response_model=APIResponse[dict])
-async def execute_code(
-    payload: ExecuteCodeRequest,
-):
-    """
-    Executes student Python / JS code in an isolated subprocess with 6-second timeout.
-    Returns real stdout, stderr, execution time, and exit code.
-    """
-    lang = (payload.language or "python").lower()
-    code = payload.code or ""
-    start_time = time.perf_counter()
-    temp_path = None
-
-    if lang in ["python", "py", "python3"]:
-        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, encoding="utf-8") as f:
-            f.write(code)
-            temp_path = f.name
-
-        try:
-            process = await asyncio.create_subprocess_exec(
-                sys.executable,
-                temp_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            try:
-                stdout_data, stderr_data = await asyncio.wait_for(process.communicate(), timeout=6.0)
-                exit_code = process.returncode
-                stdout_str = stdout_data.decode("utf-8", errors="replace")
-                stderr_str = stderr_data.decode("utf-8", errors="replace")
-            except asyncio.TimeoutError:
-                process.kill()
-                await process.communicate()
-                exit_code = 124
-                stdout_str = ""
-                stderr_str = "Execution Timeout: Code exceeded maximum runtime limit (6.0 seconds)."
-        except Exception as e:
-            exit_code = 1
-            stdout_str = ""
-            stderr_str = f"Execution failed: {str(e)}"
-        finally:
-            if temp_path and os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except Exception:
-                    pass
-
-    elif lang in ["javascript", "js", "typescript", "ts"]:
-        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
-            f.write(code)
-            temp_path = f.name
-
-        try:
-            process = await asyncio.create_subprocess_exec(
-                "node",
-                temp_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            try:
-                stdout_data, stderr_data = await asyncio.wait_for(process.communicate(), timeout=6.0)
-                exit_code = process.returncode
-                stdout_str = stdout_data.decode("utf-8", errors="replace")
-                stderr_str = stderr_data.decode("utf-8", errors="replace")
-            except asyncio.TimeoutError:
-                process.kill()
-                await process.communicate()
-                exit_code = 124
-                stdout_str = ""
-                stderr_str = "Execution Timeout: Code exceeded maximum runtime limit (6.0 seconds)."
-        except Exception as e:
-            exit_code = 1
-            stdout_str = ""
-            stderr_str = f"Execution failed: {str(e)}"
-        finally:
-            if temp_path and os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except Exception:
-                    pass
-    else:
-        exit_code = 1
-        stdout_str = ""
-        stderr_str = f"Unsupported language '{lang}'. Supported: python, javascript."
-
-    elapsed_ms = round((time.perf_counter() - start_time) * 1000, 1)
-
-    return APIResponse(
-        success=True,
-        data={
-            "language": lang,
-            "stdout": stdout_str,
-            "stderr": stderr_str,
-            "exit_code": exit_code,
-            "execution_time_ms": elapsed_ms,
-        },
-    )
 
 
 @router.get("/my", response_model=APIResponse[List[dict]])
@@ -161,8 +46,19 @@ async def get_my_sessions(
 
 @router.post("/demo", response_model=APIResponse[dict])
 async def create_demo_session(
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
+    if settings.APP_ENV != "development":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not Found",
+        )
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid authentication credentials.",
+        )
+
     try:
         session = await SessionService.create_demo_session(current_user.id)
         return APIResponse(
@@ -210,6 +106,12 @@ async def get_websocket_ticket(
             detail="Session not found.",
         )
 
+    if session.status in ["closed", "cancelled", "no_show_cancelled"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Session is {session.status}. WebSocket tickets cannot be issued.",
+        )
+
     # Verify user is one of the participants
     user_participant = next(
         (p for p in session.participants if p.user_id == current_user.id),
@@ -238,6 +140,18 @@ async def get_websocket_ticket(
     )
 
 
+class PrecheckSubmitRequest(BaseModel):
+    answers: Dict[str, str]
+
+
+class AdvancePhaseRequest(BaseModel):
+    target_phase: Optional[str] = None
+
+
+class SendMessageRequest(BaseModel):
+    content: str
+
+
 @router.get("/{session_id}/precheck", response_model=APIResponse[List[dict]])
 async def get_precheck_questions(
     session_id: PydanticObjectId,
@@ -263,9 +177,16 @@ async def advance_session_phase(
     req: AdvancePhaseRequest,
     current_user: User = Depends(get_current_user),
 ):
+    # Phase transitions are server-automated via BackgroundWorker. Manual override is restricted to admins in development.
+    if settings.APP_ENV != "development" or current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Phase advance is automated by the background worker. Manual override restricted to admins in development.",
+        )
+
     session = await SessionService.get_session(session_id)
     is_participant = any(p.user_id == current_user.id for p in session.participants)
-    if not is_participant:
+    if not is_participant and current_user.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Participant not found.")
 
     updated_session = await SessionService.advance_phase(session_id, req.target_phase)
@@ -288,25 +209,59 @@ async def advance_session_phase(
     )
 
 
+def _ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 @router.get("/{session_id}/video-token", response_model=APIResponse[dict])
 async def get_video_token(
     session_id: PydanticObjectId,
     current_user: User = Depends(get_current_user),
 ):
     session = await SessionService.get_session(session_id)
+    if session.status in ["closed", "cancelled", "no_show_cancelled"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Session is {session.status}. Video tokens cannot be issued.",
+        )
+
     user_p = next((p for p in session.participants if p.user_id == current_user.id), None)
     if not user_p:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Participant not found.")
 
-    # Generate JaaS / Jitsi Room Parameters
-    room_name = session.video_room_id or f"edumeet-{session.id}"
-    domain = "8x8.vc" if settings.JAAS_APP_ID else "meet.jit.si"
+    # Enforce window [start-5min, end of followup]
+    now = datetime.now(timezone.utc)
+    start_utc = _ensure_utc(session.scheduled_start_utc)
+    end_utc = _ensure_utc(session.scheduled_end_utc)
+    if start_utc and now < (start_utc - timedelta(minutes=5)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Video room is not active yet. It opens 5 minutes before scheduled start.",
+        )
+    if end_utc and now > end_utc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Video session window has concluded.",
+        )
+
+    room_name = session.video_room_id or f"edumeet-{secrets.token_urlsafe(16)}"
+    is_moderator = user_p.role == "teacher_a"
+    video_data = VideoProvider.generate_token(
+        user_id=str(current_user.id),
+        user_name=current_user.full_name,
+        user_email=current_user.email,
+        room_name=room_name,
+        is_moderator=is_moderator,
+    )
 
     return APIResponse(
         success=True,
         data={
-            "room_name": room_name,
-            "domain": domain,
+            **video_data,
             "display_name": current_user.full_name,
             "user_id": str(current_user.id),
             "role": user_p.role,
@@ -412,10 +367,21 @@ async def session_websocket(
             },
         )
 
+    MAX_WS_MESSAGE_SIZE = 64 * 1024  # 64 KB cap
+
     # 4. Message reception loop
     try:
         while True:
             raw_text = await websocket.receive_text()
+            if len(raw_text) > MAX_WS_MESSAGE_SIZE:
+                await websocket.send_text(
+                    json.dumps({
+                        "type": "error",
+                        "message": "Message exceeds maximum allowed size (64KB).",
+                    })
+                )
+                continue
+
             try:
                 data = json.loads(raw_text)
             except Exception:
@@ -425,8 +391,30 @@ async def session_websocket(
 
             if event_type == "chat":
                 content = str(data.get("content", "")).strip()
-                if content:
-                    chat_msg = await ws_manager.handle_chat_message(session_id, user_id_str, content)
+                if not content:
+                    continue
+
+                # Rate-limit chat per user
+                allowed = await ws_manager.check_chat_rate_limit(session_id, user_id_str)
+                if not allowed:
+                    await websocket.send_text(
+                        json.dumps({
+                            "type": "error",
+                            "message": "Chat rate limit exceeded. Please wait a few seconds before sending another message.",
+                        })
+                    )
+                    continue
+
+                chat_msg = await ws_manager.handle_chat_message(session_id, user_id_str, content)
+                # Do not broadcast error dicts; send error directly to the sending socket
+                if "error" in chat_msg:
+                    await websocket.send_text(
+                        json.dumps({
+                            "type": "error",
+                            "message": chat_msg["error"],
+                        })
+                    )
+                else:
                     await ws_manager.broadcast(session_id, chat_msg)
 
             elif event_type in ["code_sync", "whiteboard_sync", "peer_quiz_sync"]:

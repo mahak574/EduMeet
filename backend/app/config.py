@@ -10,7 +10,10 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    APP_ENV: Literal["development", "production", "test"] = "development"
+    APP_ENV: Literal["development", "production", "test"] = Field(
+        ...,
+        description="Application environment (required: development | production | test)",
+    )
     APP_NAME: str = "EduMeet"
     APP_URL: str = "http://localhost:5173"
     API_V1_PREFIX: str = "/api/v1"
@@ -45,6 +48,7 @@ class Settings(BaseSettings):
     TURNSTILE_SITE_KEY: str = "1x00000000000000000000AA"
 
     # Google OAuth
+    ENABLE_GOOGLE_LOGIN: bool = True
     GOOGLE_CLIENT_ID: Optional[str] = None
     GOOGLE_CLIENT_SECRET: Optional[str] = None
 
@@ -53,9 +57,11 @@ class Settings(BaseSettings):
     JAAS_API_KEY: Optional[str] = None
     JAAS_PRIVATE_KEY_PEM: Optional[str] = None
 
-    # AI Coach & Lesson Plan
+    # AI Coach & Lesson Plan (Google Gemini free tier)
+    GEMINI_API_KEY: Optional[str] = None
+    GEMINI_MODEL: str = "gemini-1.5-flash"
     OPENAI_API_KEY: Optional[str] = None
-    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_MODEL: Optional[str] = None
 
     @property
     def is_production(self) -> bool:
@@ -71,6 +77,9 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_readiness(self) -> "Settings":
+        if self.ENABLE_GOOGLE_LOGIN and not self.GOOGLE_CLIENT_ID:
+            raise ValueError("Configuration error: GOOGLE_CLIENT_ID is required when Google login is enabled.")
+
         if self.APP_ENV == "production":
             # 1. Refuse console email provider
             if self.EMAIL_PROVIDER == "console":

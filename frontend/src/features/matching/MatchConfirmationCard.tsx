@@ -357,10 +357,10 @@ export const MatchConfirmationCard: React.FC = () => {
       {/* Peer Cards List */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
         {roster?.peers && roster.peers.length > 0 ? (
-          roster.peers.map((peer: QueuePeerInfo) => {
+          roster.peers.map((peer: QueuePeerInfo, idx: number) => {
             return (
               <div
-                key={peer.user_id}
+                key={peer.user_id || `${peer.display_name}-${idx}`}
                 className={`p-4 rounded-2xl border transition-all space-y-3 ${
                   peer.is_me
                     ? 'bg-brand-950/20 border-brand-500/40'
@@ -387,12 +387,16 @@ export const MatchConfirmationCard: React.FC = () => {
                         )}
                       </div>
                       <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                        {peer.country && (
+                          <>
+                            <span className="flex items-center gap-1">
+                              <Globe className="w-2.5 h-2.5" /> {peer.country}
+                            </span>
+                            <span>•</span>
+                          </>
+                        )}
                         <span className="flex items-center gap-1">
-                          <Globe className="w-2.5 h-2.5" /> {peer.country}
-                        </span>
-                        <span>•</span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-2.5 h-2.5" /> Waiting {peer.waiting_minutes}m
+                          <Clock className="w-2.5 h-2.5" /> In Matching Queue
                         </span>
                       </div>
                     </div>
@@ -407,7 +411,7 @@ export const MatchConfirmationCard: React.FC = () => {
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-slate-400 text-[10px]">
-                        {peer.compatibility_label}
+                        {peer.compatibility_label || 'In Queue'}
                       </span>
                     )}
                   </div>
@@ -423,7 +427,7 @@ export const MatchConfirmationCard: React.FC = () => {
                     <p className="font-bold text-white capitalize text-xs line-clamp-1">
                       {peer.teaches_subjects.join(', ') || 'Diagnostic Calibrated'}
                     </p>
-                    {peer.teach_topics.length > 0 && (
+                    {peer.teach_topics && peer.teach_topics.length > 0 && (
                       <p className="text-[10px] text-slate-400 line-clamp-1 capitalize">
                         {peer.teach_topics.slice(0, 2).map((t: string) => t.replace(/-/g, ' ')).join(', ')}
                       </p>
@@ -438,7 +442,7 @@ export const MatchConfirmationCard: React.FC = () => {
                     <p className="font-bold text-white capitalize text-xs line-clamp-1">
                       {peer.learns_subjects.join(', ') || 'All Electives'}
                     </p>
-                    {peer.learn_topics.length > 0 && (
+                    {peer.learn_topics && peer.learn_topics.length > 0 && (
                       <p className="text-[10px] text-slate-400 line-clamp-1 capitalize">
                         {peer.learn_topics.slice(0, 2).map((t: string) => t.replace(/-/g, ' ')).join(', ')}
                       </p>

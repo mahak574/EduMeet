@@ -23,7 +23,6 @@ import {
 } from 'lucide-react';
 import { sessionApi, SessionDetails, PrecheckQuestion, ChatMessage } from '../../services/sessionApi';
 import { useAuthStore } from '../../stores/authStore';
-import { apiClient } from '../../api/client';
 import { PostSessionModal } from './PostSessionModal';
 import { AISessionPlanDrawer } from './AISessionPlanDrawer';
 import { ReportUserModal } from '../safety/ReportUserModal';
@@ -244,38 +243,7 @@ export const LiveSessionRoom: React.FC = () => {
   };
 
   const handleRunCode = async () => {
-    setTerminalOutput(`[Evaluating ${codeLanguage.toUpperCase()}]\nRunning on isolated execution sandbox...`);
-    try {
-      const res = await apiClient<{
-        language: string;
-        stdout: string;
-        stderr: string;
-        exit_code: number;
-        execution_time_ms: number;
-      }>('/sessions/execute-code', {
-        method: 'POST',
-        body: JSON.stringify({
-          code,
-          language: codeLanguage,
-        }),
-      });
-
-      let output = `[${res.language.toUpperCase()} Execution - ${res.execution_time_ms}ms]\n`;
-      if (res.stdout) {
-        output += `${res.stdout}\n`;
-      }
-      if (res.stderr) {
-        output += `\nErrors / Traceback:\n${res.stderr}\n`;
-      }
-      if (res.exit_code === 0 && !res.stderr) {
-        output += `\nProcess completed successfully (exit code 0).`;
-      } else if (res.exit_code !== 0) {
-        output += `\nProcess exited with code ${res.exit_code}.`;
-      }
-      setTerminalOutput(output.trim());
-    } catch (err: any) {
-      setTerminalOutput(`[Execution Sandbox Error]\n${err.message || 'Execution request failed'}`);
-    }
+    setTerminalOutput(`[${codeLanguage.toUpperCase()}]\nServer-side code execution has been disabled for security.\nClient-side isolated execution sandbox (Pyodide / SQLite WASM) will execute code locally in the browser.`);
   };
 
   // Send Chat Message with Optimistic Update + WebSocket + REST Fallback

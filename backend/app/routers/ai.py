@@ -1,7 +1,8 @@
 from beanie import PydanticObjectId
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 
 from app.core.dependencies import get_current_user
+from app.core.rate_limit import limiter
 from app.models.consolidated import User
 from app.schemas.ai import (
     CoachExplainRequest,
@@ -15,7 +16,9 @@ router = APIRouter(prefix="/ai", tags=["AI Coach & Session Plans"])
 
 
 @router.get("/session-plan/{session_id}", response_model=APIResponse[SessionPlanResponse])
+@limiter.limit("20/minute")
 async def get_session_plan(
+    request: Request,
     session_id: PydanticObjectId,
     current_user: User = Depends(get_current_user),
 ):
@@ -24,7 +27,9 @@ async def get_session_plan(
 
 
 @router.post("/coach/explain", response_model=APIResponse[CoachExplainResponse])
+@limiter.limit("20/minute")
 async def get_coach_explanation(
+    request: Request,
     data: CoachExplainRequest,
     current_user: User = Depends(get_current_user),
 ):

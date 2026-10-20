@@ -2,7 +2,6 @@ import json
 import logging
 from typing import Dict, List, Optional
 from datetime import datetime, timezone
-import httpx
 
 from app.config import settings
 from app.models.consolidated import Question, QuestionOption, validate_slug
@@ -1015,7 +1014,7 @@ class AIQuestionGenerator:
         Generates high-quality pedagogical questions. For mathematical subjects,
         strictly pulls authentic practical calculation problems.
         For coding subjects, pulls real executable code snippets and output prediction questions.
-        Uses OpenAI LLM if configured and applicable.
+        Uses configured LLM (e.g., Gemini free tier) if applicable.
         """
         # If mathematics domain, use practical math question bank first
         if cls.is_math_subject(subject_slug):
@@ -1029,7 +1028,8 @@ class AIQuestionGenerator:
             if code_qs and len(code_qs) >= count:
                 return code_qs
 
-        if settings.OPENAI_API_KEY:
+        # Check if an LLM provider is configured (e.g. Gemini free tier)
+        if getattr(settings, "GEMINI_API_KEY", None) or getattr(settings, "OPENAI_API_KEY", None):
             try:
                 ai_questions = await cls._generate_via_llm(subject_slug, topic_slug, count)
                 if ai_questions and len(ai_questions) >= count:
@@ -1145,26 +1145,13 @@ class AIQuestionGenerator:
             f"Return JSON format: {{\"questions\": [{{\"difficulty\": \"easy|medium|hard\", \"prompt_text\": \"...\", \"code_snippet\": null, \"options\": [{{\"id\": \"A\", \"text\": \"...\"}}], \"correct_option_id\": \"A\", \"explanation\": \"...\"}}]}}"
         )
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": settings.OPENAI_MODEL,
-                    "messages": [
-                        {"role": "system", "content": system_role},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "response_format": {"type": "json_object"},
-                    "temperature": 0.3,
-                },
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                parsed = json.loads(data["choices"][0]["message"]["content"])
+        from app.services.llm_provider import get_default_llm_provider
+
+        llm = get_default_llm_provider()
+        content = await llm.generate_completion(system_role, prompt)
+        if content:
+            try:
+                parsed = json.loads(content)
                 q_list = parsed.get("questions", [])
                 results: List[Question] = []
                 for q_dict in q_list:
@@ -1190,6 +1177,8 @@ class AIQuestionGenerator:
                         )
                     )
                 return results
+            except Exception as parse_err:
+                logger.warning("Failed to parse LLM completion as question JSON: %s", parse_err)
 
         return []
 

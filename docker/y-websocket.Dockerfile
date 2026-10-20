@@ -7,6 +7,8 @@ RUN npm install --production
 
 COPY server.js .
 
+USER node
+
 EXPOSE 1234
 
 CMD ["node", "server.js"]

@@ -1,20 +1,40 @@
 import logging
+import re
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from app.config import settings
 from app.core.rate_limit import limiter
 from app.database import close_db, init_db
 from app.routers.api_v1 import api_v1_router
 from app.schemas.common import APIError, APIResponse
 
+
+class SensitiveDataFilter(logging.Filter):
+    PATTERNS = [
+        (re.compile(r'(?i)(password|secret|token|api_key|private_key|authorization)\s*[:=]\s*["\']?([^"\'\s&]+)'), r'\1=[REDACTED]'),
+        (re.compile(r'Bearer\s+[A-Za-z0-9\-\._~\+\/]+=*', re.IGNORECASE), 'Bearer [REDACTED]'),
+        (re.compile(r'-----BEGIN[ A-Z0-9_-]+-----[^-]+-----END[ A-Z0-9_-]+-----', re.DOTALL), '[REDACTED_PEM]'),
+    ]
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            for pattern, repl in self.PATTERNS:
+                record.msg = pattern.sub(repl, record.msg)
+        return True
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+root_logger = logging.getLogger()
+root_logger.addFilter(SensitiveDataFilter())
 logger = logging.getLogger("edumeet")
+logger.addFilter(SensitiveDataFilter())
 
 
 @asynccontextmanager
@@ -26,8 +46,20 @@ async def lifespan(app: FastAPI):
         await seed_canonical_question_bank()
     except Exception as exc:
         logger.warning("Could not auto-seed question bank during startup: %s", exc)
+    if settings.APP_ENV != "test":
+        try:
+            from app.services.background_worker import background_worker
+            background_worker.start()
+        except Exception as exc:
+            logger.warning("Could not start background worker: %s", exc)
     yield
     logger.info("Shutting down EduMeet backend application...")
+    if settings.APP_ENV != "test":
+        try:
+            from app.services.background_worker import background_worker
+            background_worker.stop()
+        except Exception as exc:
+            logger.warning("Could not stop background worker: %s", exc)
     await close_db()
 
 
@@ -35,18 +67,25 @@ app = FastAPI(
     title=settings.APP_NAME,
     description="Global peer-to-peer complementary learning network backend",
     version="1.0.0",
+    docs_url=None if settings.is_production else "/docs",
+    redoc_url=None if settings.is_production else "/redoc",
+    openapi_url=None if settings.is_production else "/openapi.json",
     lifespan=lifespan,
 )
 
 # Attach SlowAPI limiter
 app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
 
-# CORS Configuration
-origins = [
-    settings.APP_URL,
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
+# CORS Configuration: restricted to APP_URL in production
+if settings.is_production:
+    origins = [settings.APP_URL]
+else:
+    origins = [
+        settings.APP_URL,
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
 
 app.add_middleware(
     CORSMiddleware,

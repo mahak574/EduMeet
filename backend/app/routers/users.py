@@ -1,9 +1,28 @@
+import secrets
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from app.core.dependencies import get_current_user
-from app.models.consolidated import Report, Session, SkillProfile, TelemetryEvent, User, validate_slug
+from app.models.consolidated import (
+    Availability,
+    Block,
+    MatchingPoolEntry,
+    Message,
+    MistakeEntry,
+    OTPChallenge,
+    PeerQuiz,
+    PushSubscription,
+    QuizAttempt,
+    Report,
+    ReviewSchedule,
+    Session,
+    SkillProfile,
+    SkillSnapshot,
+    TelemetryEvent,
+    User,
+    validate_slug,
+)
 from app.schemas.auth import UserResponse
 from app.schemas.common import APIResponse
 from app.schemas.portfolio import (
@@ -58,9 +77,23 @@ async def update_my_profile(
     if payload.age_confirmed is not None:
         current_user.age_confirmed = payload.age_confirmed
     if payload.country is not None:
-        current_user.country = payload.country.upper().strip()
+        c = payload.country.upper().strip()
+        from app.models.consolidated import ISO_3166_ALPHA_2
+        if c not in ISO_3166_ALPHA_2:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid ISO-3166-1 alpha-2 country code: '{payload.country}'.",
+            )
+        current_user.country = c
     if payload.timezone is not None:
-        current_user.timezone = payload.timezone.strip()
+        import zoneinfo
+        tz = payload.timezone.strip()
+        if tz not in zoneinfo.available_timezones():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid IANA timezone: '{payload.timezone}'.",
+            )
+        current_user.timezone = tz
     if payload.languages is not None:
         current_user.languages = [lang.strip().lower() for lang in payload.languages if lang.strip()]
     if payload.subjects_studied is not None:
@@ -83,21 +116,9 @@ async def request_student_verification(
     payload: VerifyStudentRequest,
     current_user: User = Depends(get_current_user),
 ):
-    inst_email = payload.institutional_email.lower().strip()
-    # Simple sanity check for institutional domain
-    if "@" not in inst_email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid institutional email address.",
-        )
-
-    current_user.institutional_email = inst_email
-    current_user.is_verified_student = True  # For MVP simulation; email verification link in production
-    await current_user.save()
-
-    return APIResponse(
-        success=True,
-        data={"message": f"Verification badge enabled for institutional email {inst_email}."},
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Student institutional verification is disabled until real institutional email verification is implemented.",
     )
 
 
@@ -110,18 +131,25 @@ async def update_ai_consent(
     payload: AIConsentRequest,
     current_user: User = Depends(get_current_user),
 ):
+    now_utc = datetime.now(timezone.utc)
     current_user.ai_consent = payload.ai_consent
+    current_user.ai_consent_record = {
+        "consented": payload.ai_consent,
+        "consented_at": now_utc.isoformat(),
+        "policy_version": "1.0",
+    }
     if not payload.ai_consent:
-        current_user.ai_consent_withdrawn_at = datetime.now(timezone.utc)
+        current_user.ai_consent_withdrawn_at = now_utc
     else:
         current_user.ai_consent_withdrawn_at = None
-    current_user.updated_at = datetime.now(timezone.utc)
+    current_user.updated_at = now_utc
     await current_user.save()
 
     return APIResponse(
         success=True,
         data={
             "ai_consent": current_user.ai_consent,
+            "ai_consent_record": current_user.ai_consent_record,
             "ai_consent_withdrawn_at": (
                 current_user.ai_consent_withdrawn_at.isoformat()
                 if current_user.ai_consent_withdrawn_at
@@ -134,15 +162,42 @@ async def update_ai_consent(
 
 @router.get("/me/export", response_model=APIResponse[DataExportResponse])
 async def export_my_data(current_user: User = Depends(get_current_user)):
-    profile = await SkillProfile.find_one(SkillProfile.user_id == current_user.id)
-    events = await TelemetryEvent.find(TelemetryEvent.user_id == current_user.id).to_list()
+    user_id = current_user.id
+    profile = await SkillProfile.find_one(SkillProfile.user_id == user_id)
+    events = await TelemetryEvent.find(TelemetryEvent.user_id == user_id).to_list()
+    quiz_attempts = await QuizAttempt.find(QuizAttempt.user_id == user_id).to_list()
+    snapshots = await SkillSnapshot.find(SkillSnapshot.user_id == user_id).to_list()
+    mistakes = await MistakeEntry.find(MistakeEntry.user_id == user_id).to_list()
+    reviews = await ReviewSchedule.find(ReviewSchedule.user_id == user_id).to_list()
+    availability = await Availability.find_one(Availability.user_id == user_id)
+    pool_entries = await MatchingPoolEntry.find(MatchingPoolEntry.user_id == user_id).to_list()
+    push_subs = await PushSubscription.find(PushSubscription.user_id == user_id).to_list()
+    messages = await Message.find(Message.sender_id == user_id).to_list()
+    peer_quizzes = await PeerQuiz.find(
+        {"$or": [{"creator_id": user_id}, {"target_learner_id": user_id}]}
+    ).to_list()
+    blocks = await Block.find(
+        {"$or": [{"blocker_id": user_id}, {"blocked_id": user_id}]}
+    ).to_list()
+    otp_challenges = await OTPChallenge.find(OTPChallenge.email == current_user.email).to_list()
+
     user_dict = current_user.model_dump(mode="json")
-    # Redact internal security fields
     user_dict.pop("id", None)
-    
+
     export_payload = {
         "user_profile": user_dict,
         "skill_matrix": profile.model_dump(mode="json") if profile else {},
+        "quiz_attempts": [q.model_dump(mode="json") for q in quiz_attempts],
+        "skill_snapshots": [s.model_dump(mode="json") for s in snapshots],
+        "mistake_entries": [m.model_dump(mode="json") for m in mistakes],
+        "review_schedules": [r.model_dump(mode="json") for r in reviews],
+        "availability": availability.model_dump(mode="json") if availability else {},
+        "pool_entries": [p.model_dump(mode="json") for p in pool_entries],
+        "push_subscriptions": [s.model_dump(mode="json") for s in push_subs],
+        "messages": [m.model_dump(mode="json") for m in messages],
+        "peer_quizzes": [pq.model_dump(mode="json") for pq in peer_quizzes],
+        "blocks": [b.model_dump(mode="json") for b in blocks],
+        "otp_challenges": [o.model_dump(mode="json") for o in otp_challenges],
         "telemetry_events": [e.model_dump(mode="json") for e in events],
     }
 
@@ -159,14 +214,14 @@ async def export_my_data(current_user: User = Depends(get_current_user)):
 async def delete_my_account(current_user: User = Depends(get_current_user)):
     user_id = current_user.id
 
-    # Decision Rule: Account deletion is held while a report is open
+    # Decision Rule: Account deletion is held while a report is under active investigation
     open_report = await Report.find_one(
         {
             "$or": [
                 {"reported_user_id": user_id},
                 {"reporter_user_id": user_id},
             ],
-            "status": "pending",
+            "status": {"$in": ["pending", "investigating"]},
         }
     )
     if open_report:
@@ -175,16 +230,65 @@ async def delete_my_account(current_user: User = Depends(get_current_user)):
             detail="Account deletion is temporarily held while an active Trust & Safety report is pending investigation.",
         )
 
-    # Purge telemetry events, skill profiles, and user record
+    # Purge user records across all collections
+    await QuizAttempt.find(QuizAttempt.user_id == user_id).delete()
+    await SkillSnapshot.find(SkillSnapshot.user_id == user_id).delete()
+    await MistakeEntry.find(MistakeEntry.user_id == user_id).delete()
+    await ReviewSchedule.find(ReviewSchedule.user_id == user_id).delete()
+    await Availability.find(Availability.user_id == user_id).delete()
+    await MatchingPoolEntry.find(MatchingPoolEntry.user_id == user_id).delete()
+    await PushSubscription.find(PushSubscription.user_id == user_id).delete()
+    await Message.find(Message.sender_id == user_id).delete()
+    await PeerQuiz.find({"$or": [{"creator_id": user_id}, {"target_learner_id": user_id}]}).delete()
+    await Block.find({"$or": [{"blocker_id": user_id}, {"blocked_id": user_id}]}).delete()
+    await OTPChallenge.find(OTPChallenge.email == current_user.email).delete()
     await TelemetryEvent.find(TelemetryEvent.user_id == user_id).delete()
     await SkillProfile.find(SkillProfile.user_id == user_id).delete()
+    # Delete non-investigating reports
+    await Report.find({
+        "$or": [{"reported_user_id": user_id}, {"reporter_user_id": user_id}],
+        "status": {"$nin": ["pending", "investigating"]},
+    }).delete()
+
     await current_user.delete()
     from app.services.auth_service import AuthService
     await AuthService.revoke_all_user_sessions(str(user_id))
 
     return APIResponse(
         success=True,
-        data={"message": "Account, profile data, and telemetry events permanently purged."},
+        data={"message": "All user data permanently purged across all collections."},
+    )
+
+
+@router.post("/me/portfolio/regenerate", response_model=APIResponse[dict])
+async def regenerate_portfolio_slug(current_user: User = Depends(get_current_user)):
+    """Generates a new random unguessable slug server-side."""
+    new_slug = secrets.token_urlsafe(12)
+    current_user.portfolio_slug = new_slug
+    await current_user.save()
+    return APIResponse(
+        success=True,
+        message="Portfolio slug regenerated successfully.",
+        data={
+            "portfolio_slug": current_user.portfolio_slug,
+            "portfolio_is_public": current_user.portfolio_is_public,
+        },
+    )
+
+
+@router.post("/me/portfolio/revoke", response_model=APIResponse[dict])
+async def revoke_portfolio_slug(current_user: User = Depends(get_current_user)):
+    """Revokes the current portfolio slug and makes the portfolio private."""
+    current_user.portfolio_slug = None
+    current_user.portfolio_is_public = False
+    await current_user.save()
+    return APIResponse(
+        success=True,
+        message="Portfolio slug revoked and portfolio set to private.",
+        data={
+            "portfolio_slug": None,
+            "portfolio_is_public": False,
+        },
     )
 
 
@@ -193,16 +297,10 @@ async def update_my_portfolio(
     data: UpdatePortfolioRequest,
     current_user: User = Depends(get_current_user),
 ):
-    if data.portfolio_slug is not None:
-        cleaned_slug = validate_slug(data.portfolio_slug)
-        existing = await User.find_one(User.portfolio_slug == cleaned_slug)
-        if existing and existing.id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"The portfolio slug '{cleaned_slug}' is already taken. Please choose another.",
-            )
-        current_user.portfolio_slug = cleaned_slug
-
+    if data.portfolio_is_public:
+        if not current_user.portfolio_slug:
+            # Generate random unguessable slug server-side
+            current_user.portfolio_slug = secrets.token_urlsafe(12)
     current_user.portfolio_is_public = data.portfolio_is_public
     await current_user.save()
 
@@ -226,7 +324,10 @@ async def get_my_badges(
 
 
 @router.get("/portfolio/{slug}", response_model=APIResponse[PublicPortfolioResponse])
-async def get_public_portfolio(slug: str):
+async def get_public_portfolio(slug: str, response: Response):
+    # Set noindex headers for all public portfolio responses
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+
     cleaned_slug = validate_slug(slug)
     user = await User.find_one(User.portfolio_slug == cleaned_slug)
     if not user or not user.is_active or not user.portfolio_is_public:
@@ -235,8 +336,7 @@ async def get_public_portfolio(slug: str):
             detail="Public teaching portfolio not found.",
         )
 
-    # Evaluate milestones
-    await BadgeService.evaluate_user_milestones(user.id)
+    # Strictly read-only on public GET: zero write operations
     badges = await BadgeService.get_user_badges(user.id)
 
     distinct_count = len(user.distinct_partners)
@@ -249,7 +349,7 @@ async def get_public_portfolio(slug: str):
     if not partner_diversity_unlocked:
         notice = f"Verified peer ratings unlock after completing sessions with 5 distinct study partners (current: {distinct_count}/5). This policy prevents reciprocal score inflation."
     else:
-        # Calculate true verified peer ratings
+        # Calculate verified peer ratings from closed sessions
         closed_sessions = await Session.find({
             "status": "closed",
             "participants.user_id": user.id,

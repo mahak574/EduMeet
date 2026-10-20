@@ -1,10 +1,29 @@
 import re
+import zoneinfo
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Literal, Optional
 from beanie import Document, PydanticObjectId
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from pymongo import ASCENDING, IndexModel
 
+ISO_3166_ALPHA_2 = {
+    "AD", "AE", "AF", "AG", "AI", "AL", "AM", "AO", "AQ", "AR", "AS", "AT", "AU", "AW", "AX", "AZ",
+    "BA", "BB", "BD", "BE", "BF", "BG", "BH", "BI", "BJ", "BL", "BM", "BN", "BO", "BQ", "BR", "BS",
+    "BT", "BV", "BW", "BY", "BZ", "CA", "CC", "CD", "CF", "CG", "CH", "CI", "CK", "CL", "CM", "CN",
+    "CO", "CR", "CU", "CV", "CW", "CX", "CY", "CZ", "DE", "DJ", "DK", "DM", "DO", "DZ", "EC", "EE",
+    "EG", "EH", "ER", "ES", "ET", "FI", "FJ", "FK", "FM", "FO", "FR", "GA", "GB", "GD", "GE", "GF",
+    "GG", "GH", "GI", "GL", "GM", "GN", "GP", "GQ", "GR", "GS", "GT", "GU", "GW", "GY", "HK", "HM",
+    "HN", "HR", "HT", "HU", "ID", "IE", "IL", "IM", "IN", "IO", "IQ", "IR", "IS", "IT", "JE", "JM",
+    "JO", "JP", "KE", "KG", "KH", "KI", "KM", "KN", "KP", "KR", "KW", "KY", "KZ", "LA", "LB", "LC",
+    "LI", "LK", "LR", "LS", "LT", "LU", "LV", "LY", "MA", "MC", "MD", "ME", "MF", "MG", "MH", "MK",
+    "ML", "MM", "MN", "MO", "MP", "MQ", "MR", "MS", "MT", "MU", "MV", "MW", "MX", "MY", "MZ", "NA",
+    "NC", "NE", "NF", "NG", "NI", "NL", "NO", "NP", "NR", "NU", "NZ", "OM", "PA", "PE", "PF", "PG",
+    "PH", "PK", "PL", "PM", "PN", "PR", "PS", "PT", "PW", "PY", "QA", "RE", "RO", "RS", "RU", "RW",
+    "SA", "SB", "SC", "SD", "SE", "SG", "SH", "SI", "SJ", "SK", "SL", "SM", "SN", "SO", "SR", "SS",
+    "ST", "SV", "SX", "SY", "SZ", "TC", "TD", "TF", "TG", "TH", "TJ", "TK", "TL", "TM", "TN", "TO",
+    "TR", "TT", "TV", "TW", "TZ", "UA", "UG", "UK", "UM", "US", "UY", "UZ", "VA", "VC", "VE", "VG", "VI",
+    "VN", "VU", "WF", "WS", "YE", "YT", "ZA", "ZM", "ZW"
+}
 
 # ==============================================================================
 # Helper Validators & Types
@@ -45,7 +64,14 @@ class User(Document):
     mentor_since: Optional[datetime] = None
 
     # AI Consent & Privacy (Mutual consent required for LLM calls)
-    ai_consent: bool = True
+    ai_consent: bool = False
+    ai_consent_record: Dict[str, Any] = Field(
+        default_factory=lambda: {
+            "consented": False,
+            "consented_at": None,
+            "policy_version": "1.0",
+        }
+    )
     ai_consent_withdrawn_at: Optional[datetime] = None
 
     # Teaching Portfolio (Revocable slug, public after 5+ distinct partners)
@@ -65,6 +91,21 @@ class User(Document):
     is_blocked: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @field_validator("country", mode="after")
+    @classmethod
+    def validate_country(cls, v: str) -> str:
+        v_upper = v.strip().upper()
+        if v_upper not in ISO_3166_ALPHA_2:
+            raise ValueError(f"Invalid ISO-3166-1 alpha-2 country code: '{v}'")
+        return v_upper
+
+    @field_validator("timezone", mode="after")
+    @classmethod
+    def validate_timezone(cls, v: str) -> str:
+        if v not in zoneinfo.available_timezones():
+            raise ValueError(f"Invalid IANA timezone: '{v}'")
+        return v
 
     @field_validator("subjects_studied", mode="after")
     @classmethod
@@ -208,12 +249,13 @@ class Question(Document):
 # ==============================================================================
 class QuestionItemAttempt(BaseModel):
     question_id: PydanticObjectId
-    served_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    served_at: Optional[datetime] = None
     submitted_at: Optional[datetime] = None
     time_limit_seconds: int = 90
     selected_option_id: Optional[str] = None
     is_correct: Optional[bool] = None
     timed_out: bool = False
+    elapsed_seconds: Optional[float] = None
 
 
 class QuizAttempt(Document):

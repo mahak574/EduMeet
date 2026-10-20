@@ -1,5 +1,6 @@
 import logging
 import math
+import secrets
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple, Any
 
@@ -341,22 +342,21 @@ class MatchingService:
     @classmethod
     async def get_live_roster(cls, current_user: Optional[User] = None) -> Dict[str, Any]:
         """
-        Retrieves real-time visibility into active students waiting in the matching pool:
-        what subjects they want to learn, what they teach, and mutual compatibility.
+        Retrieves real-time visibility into active students waiting in the matching pool.
+        Returns strictly authenticated first name + initial and subjects (no user_id, no country, no fake sim-peers).
         """
         active_entries = await MatchingPoolEntry.find(MatchingPoolEntry.status == "active").to_list()
-        now = datetime.now(timezone.utc)
         peers_list: List[Dict[str, Any]] = []
 
         my_teach: List[str] = []
         my_learn: List[str] = []
         if current_user:
-            my_teach = current_user.subjects_studied or ["maths"]
+            my_teach = current_user.subjects_studied or []
             my_entry = next((e for e in active_entries if e.user_id == current_user.id), None)
             if my_entry and my_entry.subject_slugs:
                 my_learn = my_entry.subject_slugs
             else:
-                my_learn = ["python"]
+                my_learn = []
 
         for entry in active_entries:
             u = await User.get(entry.user_id)
@@ -364,74 +364,31 @@ class MatchingService:
                 continue
 
             is_me = current_user is not None and u.id == current_user.id
-            waiting_mins = max(1, int((now - entry.entered_at).total_seconds() / 60))
+            teaches = u.subjects_studied if u.subjects_studied else []
+            learns = entry.subject_slugs if entry.subject_slugs else []
 
-            teaches = u.subjects_studied if u.subjects_studied else ["maths"]
-            learns = entry.subject_slugs if entry.subject_slugs else ["python"]
+            parts = (u.full_name or "Student").strip().split()
+            if len(parts) > 1:
+                name = f"{parts[0]} {parts[1][0]}."
+            elif len(parts) == 1:
+                name = parts[0]
+            else:
+                name = "Student"
 
             if is_me:
-                name = f"{u.full_name} (You)"
-            else:
-                parts = u.full_name.split()
-                name = f"{parts[0]} {parts[1][0]}." if len(parts) > 1 else u.full_name
+                name = f"{name} (You)"
 
             can_teach_me = any(s in my_learn for s in teaches)
             wants_from_me = any(s in my_teach for s in learns)
             is_compatible = can_teach_me or wants_from_me
 
-            if can_teach_me and wants_from_me:
-                compat_label = "🌟 98% Reciprocal Match (Teaches what you need & learns your strength)"
-            elif can_teach_me:
-                compat_label = "Compatible Mentor (Can teach your target subject)"
-            elif wants_from_me:
-                compat_label = "Compatible Learner (Wants to learn your strength)"
-            else:
-                compat_label = "Available Peer in Queue"
-
             peers_list.append({
-                "user_id": str(u.id),
                 "display_name": name,
-                "country": u.country or "IN",
                 "teaches_subjects": teaches,
                 "learns_subjects": learns,
-                "teach_topics": [f"{s}-foundations" for s in teaches[:2]],
-                "learn_topics": [f"{s}-foundations" for s in learns[:2]],
-                "waiting_minutes": waiting_mins,
-                "compatibility_label": compat_label,
                 "is_compatible": is_compatible,
                 "is_me": is_me,
             })
-
-        # Ensure that during single-user testing, peers and subject cues are visible
-        if len([p for p in peers_list if not p.get("is_me")]) < 2:
-            peers_list.extend([
-                {
-                    "user_id": "sim-peer-1",
-                    "display_name": "Jordan (Peer Mentor)",
-                    "country": "US",
-                    "teaches_subjects": ["python", "machine-learning"],
-                    "learns_subjects": ["maths", "physics"],
-                    "teach_topics": ["python-syntax-and-types", "oop-and-dunder-methods"],
-                    "learn_topics": ["calculus-and-algebra", "optics-and-waves"],
-                    "waiting_minutes": 3,
-                    "compatibility_label": "🌟 99% Perfect Reciprocal Match (Teaches Python, Learns Mathematics)",
-                    "is_compatible": True,
-                    "is_me": False,
-                },
-                {
-                    "user_id": "sim-peer-2",
-                    "display_name": "Maya S.",
-                    "country": "IN",
-                    "teaches_subjects": ["physics", "maths"],
-                    "learns_subjects": ["python"],
-                    "teach_topics": ["optics-and-waves", "linear-algebra"],
-                    "learn_topics": ["data-structures-and-types"],
-                    "waiting_minutes": 5,
-                    "compatibility_label": "Compatible Learner (Looking to learn Python from you)",
-                    "is_compatible": True,
-                    "is_me": False,
-                },
-            ])
 
         return {
             "total_active_in_queue": len(peers_list),
@@ -606,6 +563,13 @@ class MatchingService:
                 detail="You are not a participant in this match.",
             )
 
+        user = await User.get(user_id)
+        if not user or not user.age_confirmed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Age confirmation is required before confirming a match or creating a session.",
+            )
+
         # Update confirmation status
         chosen_slot_utc = _ensure_utc(chosen_slot)
         user_party.confirmed = True
@@ -628,7 +592,7 @@ class MatchingService:
                 match_id=match.id,
                 session_mode="regular_30_30",
                 status="scheduled",
-                video_room_id=f"edumeet-room-{match.id}",
+                video_room_id=f"edumeet-{secrets.token_urlsafe(16)}",
                 yjs_doc_id=f"edumeet-doc-{match.id}",
                 scheduled_start_utc=session_start_utc,
                 scheduled_end_utc=session_end_utc,
