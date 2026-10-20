@@ -31,6 +31,9 @@ async def join_matching_pool(
             detail="Age confirmation is required before joining the matching pool.",
         )
     entry = await MatchingService.join_pool(current_user.id, req.subject_slugs)
+    # Immediately trigger an asynchronous matching cycle so complementary candidates pair in real-time
+    import asyncio
+    asyncio.create_task(MatchingService.run_matching_cycle())
     return APIResponse(
         success=True,
         data=PoolStatusResponse(
