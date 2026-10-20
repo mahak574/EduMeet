@@ -17,7 +17,10 @@ import {
   Code2,
   Award,
   Sparkles,
+  ShieldCheck,
 } from 'lucide-react';
+import { apiClient } from '../../api/client';
+import { User } from '../../types';
 import { quizApi, CurrentQuestion, QuizResult } from '../../services/quizApi';
 import { useAuthStore } from '../../stores/authStore';
 import { AuthModal } from '../auth/AuthModal';
@@ -86,7 +89,7 @@ export const DiagnosticQuizModal: React.FC<DiagnosticQuizModalProps> = ({
   subjectSlug,
   onComplete,
 }) => {
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, user, updateUser } = useAuthStore();
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [attemptId, setAttemptId] = useState<string | null>(null);
   const [currentQuestion, setCurrentQuestion] = useState<CurrentQuestion | null>(null);
@@ -97,6 +100,10 @@ export const DiagnosticQuizModal: React.FC<DiagnosticQuizModalProps> = ({
   const [tabWarning, setTabWarning] = useState<string | null>(null);
   const [quizResult, setQuizResult] = useState<QuizResult | null>(null);
   const [reviewFilter, setReviewFilter] = useState<'all' | 'wrong' | 'correct'>('all');
+
+  // Age confirmation state for unconfirmed users
+  const [ageChecked, setAgeChecked] = useState<boolean>(false);
+  const [isConfirmingAge, setIsConfirmingAge] = useState<boolean>(false);
 
   // Math level selection state
   const isGenericMath = subjectSlug.toLowerCase() === 'maths' || subjectSlug.toLowerCase() === 'mathematics';
@@ -122,6 +129,25 @@ export const DiagnosticQuizModal: React.FC<DiagnosticQuizModalProps> = ({
       setIsLoading(false);
     }
   }, []);
+
+  const handleConfirmAgeAndStart = async () => {
+    setIsConfirmingAge(true);
+    try {
+      const updated = await apiClient<User>('/users/me', {
+        method: 'PATCH',
+        body: JSON.stringify({ age_confirmed: true }),
+      });
+      if (user) {
+        updateUser({ ...user, ...updated, age_confirmed: true });
+      }
+      setErrorMsg(null);
+      await startAssessment(activeSlug);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to update age confirmation.');
+    } finally {
+      setIsConfirmingAge(false);
+    }
+  };
 
   // Load current question
   const loadNextQuestion = async (aId: string) => {
@@ -343,35 +369,89 @@ export const DiagnosticQuizModal: React.FC<DiagnosticQuizModalProps> = ({
             </div>
           ) : errorMsg ? (
             <div className="p-6 text-center space-y-4">
-              <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-2xl inline-block">
-                <AlertTriangle className="w-8 h-8" />
-              </div>
-              <h3 className="text-lg font-bold text-white">Assessment Notice</h3>
-              <p className="text-slate-300 text-sm max-w-md mx-auto">{errorMsg}</p>
-              <div className="flex items-center justify-center gap-3 pt-2">
-                <button
-                  onClick={onClose}
-                  className="px-6 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-medium transition-colors cursor-pointer"
-                >
-                  Close
-                </button>
-                {isAnyMath && (
-                  <button
-                    onClick={() => setShowLevelPicker(true)}
-                    className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium transition-all cursor-pointer"
-                  >
-                    Select Another Level
-                  </button>
-                )}
-                {!isAuthenticated && (
-                  <button
-                    onClick={() => setAuthModalOpen(true)}
-                    className="px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium transition-all shadow-md shadow-brand-500/25 flex items-center gap-2 cursor-pointer"
-                  >
-                    <LogIn className="w-4 h-4" /> Log In / Sign Up
-                  </button>
-                )}
-              </div>
+              {errorMsg.toLowerCase().includes('age confirmation') ? (
+                <>
+                  <div className="p-3 bg-brand-500/10 border border-brand-500/20 text-brand-400 rounded-2xl inline-block">
+                    <ShieldCheck className="w-8 h-8" />
+                  </div>
+                  <h3 className="text-lg font-bold text-white">Age Confirmation Required</h3>
+                  <p className="text-slate-300 text-sm max-w-md mx-auto leading-relaxed">
+                    EduMeet requires students to confirm they are 18 years of age or older before taking diagnostic assessments and participating in peer study sessions.
+                  </p>
+
+                  <div className="max-w-md mx-auto p-4 rounded-2xl bg-slate-800/70 border border-slate-700 text-left">
+                    <label className="flex items-start gap-3 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={ageChecked}
+                        onChange={(e) => setAgeChecked(e.target.checked)}
+                        className="mt-0.5 rounded border-slate-600 text-brand-500 focus:ring-brand-500 cursor-pointer"
+                      />
+                      <span className="text-xs text-slate-200 font-medium leading-relaxed">
+                        I confirm that I am at least 18 years old and agree to mutual peer teaching standards.
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="flex items-center justify-center gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-medium transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!ageChecked || isConfirmingAge}
+                      onClick={handleConfirmAgeAndStart}
+                      className="px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold transition-all shadow-md shadow-brand-500/25 flex items-center gap-2 cursor-pointer"
+                    >
+                      {isConfirmingAge ? (
+                        <>
+                          <RotateCcw className="w-4 h-4 animate-spin" /> Confirming...
+                        </>
+                      ) : (
+                        <>
+                          Confirm & Start Quiz <ArrowRight className="w-4 h-4" />
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-2xl inline-block">
+                    <AlertTriangle className="w-8 h-8" />
+                  </div>
+                  <h3 className="text-lg font-bold text-white">Assessment Notice</h3>
+                  <p className="text-slate-300 text-sm max-w-md mx-auto">{errorMsg}</p>
+                  <div className="flex items-center justify-center gap-3 pt-2">
+                    <button
+                      onClick={onClose}
+                      className="px-6 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-medium transition-colors cursor-pointer"
+                    >
+                      Close
+                    </button>
+                    {isAnyMath && (
+                      <button
+                        onClick={() => setShowLevelPicker(true)}
+                        className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium transition-all cursor-pointer"
+                      >
+                        Select Another Level
+                      </button>
+                    )}
+                    {!isAuthenticated && (
+                      <button
+                        onClick={() => setAuthModalOpen(true)}
+                        className="px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium transition-all shadow-md shadow-brand-500/25 flex items-center gap-2 cursor-pointer"
+                      >
+                        <LogIn className="w-4 h-4" /> Log In / Sign Up
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           ) : quizResult ? (
             /* Comprehensive Academic Report Card Screen */

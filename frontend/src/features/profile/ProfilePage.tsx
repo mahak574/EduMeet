@@ -51,6 +51,7 @@ export const ProfilePage: React.FC = () => {
   if (!user) return null;
 
   const [fullName, setFullName] = useState(user.full_name || '');
+  const [ageConfirmed, setAgeConfirmed] = useState(user.age_confirmed || false);
   const [country, setCountry] = useState(user.country || 'IN');
   const [timezone, setTimezone] = useState(user.timezone || 'UTC');
   const [teachingStyle, setTeachingStyle] = useState(user.preferences?.preferred_teaching_style || 'example_heavy');
@@ -93,6 +94,7 @@ export const ProfilePage: React.FC = () => {
         method: 'PATCH',
         body: JSON.stringify({
           full_name: fullName,
+          age_confirmed: ageConfirmed,
           country,
           timezone,
           subjects_studied: subjects,
@@ -250,6 +252,20 @@ export const ProfilePage: React.FC = () => {
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div className="md:col-span-2 p-4 rounded-xl bg-slate-900/60 border border-slate-800 flex items-start gap-3">
+              <input
+                id="profile-age-confirm"
+                type="checkbox"
+                checked={ageConfirmed}
+                onChange={(e) => setAgeConfirmed(e.target.checked)}
+                className="mt-0.5 rounded border-slate-700 text-brand-500 focus:ring-brand-500 cursor-pointer"
+              />
+              <label htmlFor="profile-age-confirm" className="text-xs text-slate-300 cursor-pointer select-none">
+                <span className="font-semibold text-white block mb-0.5">Age Confirmation (18+ Requirement)</span>
+                I confirm that I am at least 18 years old. Age confirmation is required to participate in diagnostic quizzes and reciprocal peer teaching sessions.
+              </label>
             </div>
           </div>
         </div>
