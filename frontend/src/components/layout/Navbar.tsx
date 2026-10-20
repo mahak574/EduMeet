@@ -14,6 +14,7 @@ import {
 export const Navbar: React.FC = () => {
   const { user, isAuthenticated, logout } = useAuthStore();
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('signup');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   return (
@@ -83,18 +84,36 @@ export const Navbar: React.FC = () => {
                 )}
               </div>
             ) : (
-              <button
-                onClick={() => setAuthModalOpen(true)}
-                className="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-medium text-xs sm:text-sm transition-all shadow-md shadow-brand-500/25 flex items-center gap-2 cursor-pointer"
-              >
-                <Sparkles className="w-4 h-4" /> Get Started / Sign In
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setAuthMode('login');
+                    setAuthModalOpen(true);
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/60 border border-transparent hover:border-slate-700 text-xs sm:text-sm font-medium transition-all cursor-pointer"
+                >
+                  Log In
+                </button>
+                <button
+                  onClick={() => {
+                    setAuthMode('signup');
+                    setAuthModalOpen(true);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-medium text-xs sm:text-sm transition-all shadow-md shadow-brand-500/25 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4" /> Sign Up
+                </button>
+              </div>
             )}
           </div>
         </div>
       </header>
 
-      <AuthModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} />
+      <AuthModal
+        isOpen={authModalOpen}
+        mode={authMode}
+        onClose={() => setAuthModalOpen(false)}
+      />
     </>
   );
 };

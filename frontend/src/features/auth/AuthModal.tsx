@@ -6,13 +6,14 @@ import { X, Mail, ShieldCheck, ArrowRight, RefreshCw, CheckCircle2, Sparkles } f
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
+  mode?: 'login' | 'signup';
 }
 
 const GOOGLE_CLIENT_ID =
   (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID ||
   '915728215365-0sfpmtc038889gau3tafrvrf6gfrcrgu.apps.googleusercontent.com';
 
-export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
+export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, mode = 'signup' }) => {
   const { sendOtp, verifyOtp, googleLogin, demoLogin } = useAuthStore();
   const [step, setStep] = useState<'email' | 'otp'>('email');
   const [email, setEmail] = useState('');
@@ -191,11 +192,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             <ShieldCheck className="w-6 h-6" />
           </div>
           <h2 className="text-2xl font-bold font-sans text-white">
-            {step === 'email' ? 'Welcome to EduMeet' : 'Enter Verification Code'}
+            {step === 'email'
+              ? mode === 'login'
+                ? 'Sign In to EduMeet'
+                : 'Create Your Account'
+              : 'Enter Verification Code'}
           </h2>
           <p className="text-sm text-slate-400 mt-1">
             {step === 'email'
-              ? 'Join the global reciprocal peer teaching network'
+              ? mode === 'login'
+                ? 'Welcome back to the reciprocal peer teaching network'
+                : 'Join the global reciprocal peer teaching network'
               : `We sent a 6-digit code to ${email}`}
           </p>
         </div>

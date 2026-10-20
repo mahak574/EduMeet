@@ -280,6 +280,14 @@ class QuizAttempt(Document):
     auto_submitted_due_to_violations: bool = False
     overall_score_percentage: Optional[float] = None
 
+    @property
+    def score_percentage(self) -> float:
+        if self.overall_score_percentage is not None:
+            return float(self.overall_score_percentage)
+        correct_count = sum(1 for it in self.items if it.is_correct is True)
+        total_count = len(self.items) or len(self.assigned_question_ids) or 1
+        return round((correct_count / total_count) * 100, 1) if self.is_completed else 0.0
+
     @field_validator("subject_slug", mode="after")
     @classmethod
     def validate_slugs(cls, val: str) -> str:

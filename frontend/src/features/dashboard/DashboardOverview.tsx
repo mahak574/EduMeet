@@ -2,68 +2,160 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { AuthModal } from '../auth/AuthModal';
-import { SkillMatrix } from './SkillMatrix';
-import { MatchConfirmationCard } from '../matching/MatchConfirmationCard';
+import { PublicOverview } from '../overview/PublicOverview';
+import { WeeklyStreakHeatmap } from './WeeklyStreakHeatmap';
 import {
   BrainCircuit,
+  Users2,
+  Video,
+  FileSpreadsheet,
   Scale,
   Sparkles,
   ArrowRight,
-  Lightbulb,
+  User as UserIcon,
 } from 'lucide-react';
 
-import { WeeklyStreakHeatmap } from './WeeklyStreakHeatmap';
-
 export const DashboardOverview: React.FC = () => {
-  const { isAuthenticated } = useAuthStore();
+  const { user, isAuthenticated } = useAuthStore();
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('signup');
 
+  // 1. Logged-out visitors see ONLY the comprehensive Public Overview
+  if (!isAuthenticated) {
+    return (
+      <>
+        <PublicOverview
+          onOpenAuth={(mode) => {
+            setAuthMode(mode);
+            setAuthModalOpen(true);
+          }}
+        />
+        <AuthModal
+          isOpen={authModalOpen}
+          mode={authMode}
+          onClose={() => setAuthModalOpen(false)}
+        />
+      </>
+    );
+  }
+
+  // 2. Authenticated users see a concise summary & navigation hub (without duplicating full tab widgets)
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
-      {/* Hero Welcome */}
-      <div className="relative overflow-hidden p-6 sm:p-10 rounded-3xl glass-panel border border-brand-500/20 shadow-2xl">
+      {/* Personalized Welcome Banner */}
+      <div className="relative overflow-hidden p-6 sm:p-8 rounded-3xl glass-panel border border-brand-500/20 shadow-2xl">
         <div className="absolute top-0 right-0 -mt-8 -mr-8 w-64 h-64 bg-brand-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="max-w-2xl relative z-10 space-y-4">
+        <div className="max-w-2xl relative z-10 space-y-3">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-500/15 border border-brand-500/30 text-brand-300 text-xs font-semibold">
-            <Sparkles className="w-3.5 h-3.5" /> Reciprocal Peer Teaching
+            <Sparkles className="w-3.5 h-3.5" /> Welcome back, {user?.full_name || 'Student'}
           </div>
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight font-sans leading-tight">
-            Learn What You Lack.
-            <br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-400 to-indigo-300">
-              Master What You Teach.
-            </span>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight font-sans">
+            Your Reciprocal Learning Hub
           </h1>
-          <p className="text-slate-300 text-sm sm:text-base leading-relaxed">
-            EduMeet pairs you with a peer who has complementary strengths. If you are strong in Mathematics and learning Python, you teach Mathematics for 30 minutes, they teach you Python for 30 minutes, then you exchange peer quizzes.
+          <p className="text-slate-300 text-xs sm:text-sm leading-relaxed">
+            Every session is split equally: 25 minutes teaching what you know, 25 minutes learning what you lack, and 10 minutes peer quiz exchange.
           </p>
 
-          <div className="flex flex-wrap gap-4 pt-2">
-            {!isAuthenticated ? (
-              <button
-                onClick={() => setAuthModalOpen(true)}
-                className="px-6 py-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-medium text-sm transition-all shadow-lg shadow-brand-500/25 flex items-center gap-2 cursor-pointer"
-              >
-                Join EduMeet Network <ArrowRight className="w-4 h-4" />
-              </button>
-            ) : (
-              <Link
-                to="/profile"
-                className="px-6 py-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-medium text-sm transition-all shadow-lg shadow-brand-500/25 flex items-center gap-2"
-              >
-                Customize Learning Profile <ArrowRight className="w-4 h-4" />
-              </Link>
-            )}
-          </div>
+          {user?.subjects_studied && user.subjects_studied.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 pt-2">
+              <span className="text-xs text-slate-400">Active Subjects:</span>
+              {user.subjects_studied.map((sub) => (
+                <span
+                  key={sub}
+                  className="px-2.5 py-0.5 rounded-lg bg-slate-900 border border-slate-700 text-brand-300 text-xs font-medium uppercase tracking-wide"
+                >
+                  {sub}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Weekly Streak Consistency Tracker & GitHub Contribution Heat Map */}
+      {/* Navigation Hub: Compact Quick-Actions to Dedicated Tabs */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        {/* Diagnostic Quiz Card */}
+        <div className="glass-panel p-5 rounded-2xl border border-white/10 flex flex-col justify-between space-y-4 hover:border-brand-500/40 transition-colors">
+          <div className="space-y-2">
+            <div className="w-9 h-9 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center">
+              <BrainCircuit className="w-5 h-5" />
+            </div>
+            <h3 className="font-bold text-white text-sm">Diagnostic Quiz</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Verify your actual topic skill level with adaptive diagnostic assessments.
+            </p>
+          </div>
+          <Link
+            to="/diagnostic"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-400 hover:text-brand-300 pt-2"
+          >
+            Open Diagnostic Quiz <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+
+        {/* Peer Match Card */}
+        <div className="glass-panel p-5 rounded-2xl border border-white/10 flex flex-col justify-between space-y-4 hover:border-brand-500/40 transition-colors">
+          <div className="space-y-2">
+            <div className="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
+              <Users2 className="w-5 h-5" />
+            </div>
+            <h3 className="font-bold text-white text-sm">Match</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Discover complementary peers ready for live or scheduled reciprocal learning.
+            </p>
+          </div>
+          <Link
+            to="/matching"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-400 hover:text-indigo-300 pt-2"
+          >
+            Find a Learning Peer <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+
+        {/* Sessions Card */}
+        <div className="glass-panel p-5 rounded-2xl border border-white/10 flex flex-col justify-between space-y-4 hover:border-brand-500/40 transition-colors">
+          <div className="space-y-2">
+            <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center justify-center">
+              <Video className="w-5 h-5" />
+            </div>
+            <h3 className="font-bold text-white text-sm">Sessions</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Join upcoming video/whiteboard rooms or view completed session transcripts.
+            </p>
+          </div>
+          <Link
+            to="/sessions"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-400 hover:text-blue-300 pt-2"
+          >
+            Go to Sessions <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+
+        {/* Review Card */}
+        <div className="glass-panel p-5 rounded-2xl border border-white/10 flex flex-col justify-between space-y-4 hover:border-brand-500/40 transition-colors">
+          <div className="space-y-2">
+            <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center">
+              <FileSpreadsheet className="w-5 h-5" />
+            </div>
+            <h3 className="font-bold text-white text-sm">Review</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Review missed peer quiz items and reinforce learning through spaced repetition.
+            </p>
+          </div>
+          <Link
+            to="/mistakes"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-400 hover:text-emerald-300 pt-2"
+          >
+            Open Review Deck <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+      </div>
+
+      {/* Weekly Streak Consistency Tracker */}
       <WeeklyStreakHeatmap />
 
-      {/* Private Motivation & Diagnostic Health */}
+      {/* Fairness Balance & Platform Principle Card */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Private Fairness Meter Card */}
         <div className="glass-panel p-6 rounded-2xl border border-white/10 space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Fairness Balance</span>
@@ -85,80 +177,29 @@ export const DashboardOverview: React.FC = () => {
           </div>
         </div>
 
-        {/* Diagnostic Assessment Status */}
         <div className="glass-panel p-6 rounded-2xl border border-white/10 space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Diagnostic Readiness</span>
-            <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
-              <BrainCircuit className="w-4 h-4" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Learning Profile</span>
+            <div className="p-2 rounded-xl bg-slate-800 text-slate-300 border border-slate-700">
+              <UserIcon className="w-4 h-4" />
             </div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-white">Diagnostic Bank</div>
+            <div className="text-xl font-bold text-white truncate">{user?.full_name || 'Active Student'}</div>
             <p className="text-xs text-slate-400 mt-1">
-              Take a low-stakes evaluation to unlock topic-level peer matching.
+              Timezone: {user?.timezone || 'UTC'} • Teaching Style: {user?.preferences?.preferred_teaching_style || 'Example Heavy'}
             </p>
           </div>
           <div className="pt-2">
             <Link
-              to="/diagnostic"
+              to="/profile"
               className="inline-flex items-center gap-1.5 text-xs text-brand-300 hover:text-brand-200 font-medium"
             >
-              Calibrated by Bayesian Diagnostics →
+              Update Preferences & Subjects →
             </Link>
           </div>
         </div>
       </div>
-
-      {/* Reciprocal Peer Match / Queue Widget */}
-      <MatchConfirmationCard />
-
-      {/* Private Skill Matrix & Diagnostics */}
-      <SkillMatrix />
-
-      {/* How It Works 3-Step Walkthrough */}
-      <div className="glass-panel p-6 rounded-2xl border border-white/10 space-y-6">
-        <h2 className="text-xl font-bold text-white font-sans flex items-center gap-2">
-          <Lightbulb className="w-5 h-5 text-amber-400" />
-          The EduMeet Reciprocal Model
-        </h2>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
-            <div className="w-7 h-7 rounded-lg bg-brand-600/20 border border-brand-500/30 text-brand-300 flex items-center justify-center font-bold text-xs">
-              1
-            </div>
-            <h3 className="font-semibold text-white text-sm">Complementary Pairing</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              If student A is strong in Graphs and weak in Indexing, and student B is strong in Indexing and weak in Graphs, the graph matching engine pairs them up.
-            </p>
-          </div>
-
-          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
-            <div className="w-7 h-7 rounded-lg bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 flex items-center justify-center font-bold text-xs">
-              2
-            </div>
-            <h3 className="font-semibold text-white text-sm">Synchronized 1-Hour Session</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              25 minutes: Teacher A teaches Topic A.<br />
-              25 minutes: Teacher B teaches Topic B.<br />
-              10 minutes: Exchange peer-made test questions.
-            </p>
-          </div>
-
-          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
-            <div className="w-7 h-7 rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 flex items-center justify-center font-bold text-xs">
-              3
-            </div>
-            <h3 className="font-semibold text-white text-sm">Growth Without Ranking</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              No leaderboards or public competition. Your skill progression and mistake journal are private, shared only with your session partner.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <AuthModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} />
     </div>
   );
 };

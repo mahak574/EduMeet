@@ -66,11 +66,14 @@ class StreakService:
         user_quizzes: List[Dict[str, Any]] = []
         for q in quizzes:
             act_date = q.completed_at.date() if q.completed_at else q.started_at.date()
+            score = getattr(q, "score_percentage", None)
+            if score is None:
+                score = getattr(q, "overall_score_percentage", 0.0) or 0.0
             user_quizzes.append({
                 "quiz_id": str(q.id),
                 "date": act_date,
                 "subject": q.subject_slug,
-                "score": q.score_percentage,
+                "score": score,
             })
 
         # 3. Fetch Mistake / Spaced repetition entries

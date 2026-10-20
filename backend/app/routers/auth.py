@@ -181,15 +181,33 @@ async def verify_google_id_token(id_token: str) -> dict:
             detail="Google authentication is not configured.",
         )
 
-    from google.oauth2 import id_token as google_id_token
-    from google.auth.transport import requests as google_requests
-
+    id_info = None
     try:
+        from google.oauth2 import id_token as google_id_token
+        from google.auth.transport import requests as google_requests
+
         id_info = google_id_token.verify_oauth2_token(
             id_token,
             google_requests.Request(),
             audience=settings.GOOGLE_CLIENT_ID,
         )
+    except (ImportError, ModuleNotFoundError):
+        # Fallback to Google's official tokeninfo endpoint if google-auth is not installed in current environment
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    "https://oauth2.googleapis.com/tokeninfo",
+                    params={"id_token": id_token},
+                )
+                if resp.status_code == 200:
+                    token_data = resp.json()
+                    # Validate audience
+                    if token_data.get("aud") == settings.GOOGLE_CLIENT_ID:
+                        id_info = token_data
+                    else:
+                        logger.warning("Google token audience mismatch.")
+        except Exception as net_exc:
+            logger.warning(f"Google tokeninfo validation network error: {net_exc}")
     except Exception as exc:
         logger.warning(f"Google ID token verification failed: {exc}")
         raise HTTPException(
@@ -197,7 +215,14 @@ async def verify_google_id_token(id_token: str) -> dict:
             detail="Invalid or expired Google authentication token. Please sign in again.",
         )
 
-    if not id_info.get("email_verified"):
+    if not id_info:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired Google authentication token. Please sign in again.",
+        )
+
+    email_verified = id_info.get("email_verified")
+    if email_verified is not True and str(email_verified).lower() != "true":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Your Google account email address must be verified.",

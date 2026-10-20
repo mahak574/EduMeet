@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './stores/authStore';
 import { Layout } from './components/layout/Layout';
+import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import { DashboardOverview } from './features/dashboard/DashboardOverview';
 import { ProfilePage } from './features/profile/ProfilePage';
 import { DiagnosticHubPage } from './features/quiz/DiagnosticHubPage';
@@ -22,16 +23,65 @@ export const App: React.FC = () => {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Layout />}>
+          {/* Public Overview (unauthenticated) or Summary Dashboard (authenticated) */}
           <Route index element={<DashboardOverview />} />
-          <Route path="profile" element={<ProfilePage />} />
-          <Route path="diagnostic" element={<DiagnosticHubPage />} />
-          <Route path="matching" element={<MatchingHubPage />} />
-          <Route path="sessions" element={<SessionsHubPage />} />
-          <Route path="mistakes" element={<MistakeJournalView />} />
+
+          {/* Strictly Protected Authenticated Tabs */}
+          <Route
+            path="profile"
+            element={
+              <ProtectedRoute>
+                <ProfilePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="diagnostic"
+            element={
+              <ProtectedRoute>
+                <DiagnosticHubPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="matching"
+            element={
+              <ProtectedRoute>
+                <MatchingHubPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="sessions"
+            element={
+              <ProtectedRoute>
+                <SessionsHubPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="mistakes"
+            element={
+              <ProtectedRoute>
+                <MistakeJournalView />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Public Portfolio */}
           <Route path="portfolio/:slug" element={<PublicPortfolioView />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
-        <Route path="/session/:sessionId" element={<LiveSessionRoom />} />
+
+        {/* Protected Live Interactive Session Workspace */}
+        <Route
+          path="/session/:sessionId"
+          element={
+            <ProtectedRoute>
+              <LiveSessionRoom />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/p/:slug" element={<PublicPortfolioView />} />
       </Routes>
     </BrowserRouter>
